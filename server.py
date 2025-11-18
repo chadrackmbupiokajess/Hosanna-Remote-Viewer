@@ -31,50 +31,62 @@ KEY_MAP = {
     'pagedown': Key.page_down, 'insert': Key.insert,
 }
 
-# --- File d'attente et processeur de commandes ---
 command_queue = Queue()
 
 def command_processor(stop_event):
     mouse_ctrl = MouseController()
     keyboard_ctrl = KeyboardController()
-    
     while not stop_event.is_set():
         try:
-            commands = [command_queue.get(timeout=1)]
+            commands = [command_queue.get(timeout=0.02)]
             while not command_queue.empty():
                 commands.append(command_queue.get_nowait())
 
             last_move = None
             other_commands = []
             for cmd in commands:
-                if cmd[0] == 'MV':
-                    last_move = cmd
-                else:
-                    other_commands.append(cmd)
+                if cmd[0] == 'MV': last_move = cmd
+                else: other_commands.append(cmd)
             
             if last_move:
                 mouse_ctrl.position = last_move[1]
+                # print(f"[SERVER DEBUG] Souris déplacée à {last_move[1]}") # Décommenter pour débogage
 
             for cmd_type, value in other_commands:
+                # CORRECTION: Revenir à la logique standard des boutons de souris
                 if cmd_type == 'MC':
-                    # LA CORRECTION EST ICI: La logique a été inversée
-                    btn = Button.left if value[0] == 'left' else Button.right
-                    if value[1]: # Si 'pressed' est vrai (1)
-                        mouse_ctrl.press(btn)
-                    else: # Si 'pressed' est faux (0)
-                        mouse_ctrl.release(btn)
+                    btn_name, pressed = value
+                    # Si le client dit 'left', on utilise Button.left (principal)
+                    # Si le client dit 'right', on utilise Button.right (secondaire)
+                    button = Button.left if btn_name == 'left' else Button.right # <-- REVERT ICI
+                    if pressed:
+                        mouse_ctrl.press(button)
+                        # print(f"[SERVER DEBUG] Bouton {btn_name} pressé.") # Décommenter pour débogage
+                    else:
+                        mouse_ctrl.release(button)
+                        # print(f"[SERVER DEBUG] Bouton {btn_name} relâché.") # Décommenter pour débogage
+                elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
+                    x, y, btn_name = value
+                    mouse_ctrl.position = (x, y)
+                    # Si le client dit 'left', on utilise Button.left (principal)
+                    # Si le client dit 'right', on utilise Button.right (secondaire)
+                    button = Button.left if btn_name == 'left' else Button.right # <-- REVERT ICI
+                    click_count = 2 if cmd_type == 'DBLCLICK' else 1
+                    mouse_ctrl.click(button, click_count)
+                    # print(f"[SERVER DEBUG] {cmd_type} sur ({x},{y}) avec bouton {btn_name}, count={click_count}") # Décommenter pour débogage
                 elif cmd_type == 'KP':
                     key = KEY_MAP.get(value, value)
                     keyboard_ctrl.press(key)
+                    # print(f"[SERVER DEBUG] Touche {value} pressée.") # Décommenter pour débogage
                 elif cmd_type == 'KR':
                     key = KEY_MAP.get(value, value)
                     keyboard_ctrl.release(key)
+                    # print(f"[SERVER DEBUG] Touche {value} relâchée.") # Décommenter pour débogage
         except Empty:
             continue
         except Exception as e:
             print(f"[!] Erreur dans command_processor: {e}")
 
-# --- Le reste du code est inchangé ---
 def recv_all(sock, n):
     data = bytearray()
     while len(data) < n:
@@ -82,6 +94,7 @@ def recv_all(sock, n):
         if not packet: return None
         data.extend(packet)
     return data
+
 def handle_client(client_socket):
     stop_event = threading.Event()
     processor_thread = threading.Thread(target=command_processor, args=(stop_event,))
@@ -96,15 +109,20 @@ def handle_client(client_socket):
                 command_data = recv_all(client_socket, cmd_len)
                 if not command_data: break
                 command = command_data.decode('utf-8')
+                # print(f"[SERVER DEBUG] Commande brute reçue: {command}") # Décommenter pour débogage
                 parts = command.split(',', 1)
                 if len(parts) < 2: continue
                 cmd_type, value_str = parts[0], parts[1]
+                
                 if cmd_type == 'MV':
                     x, y = value_str.split(',')
                     command_queue.put(('MV', (int(x), int(y))))
                 elif cmd_type == 'MC':
                     btn, pressed = value_str.split(',')
                     command_queue.put(('MC', (btn, int(pressed))))
+                elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
+                    x, y, btn = value_str.split(',')
+                    command_queue.put((cmd_type, (int(x), int(y), btn)))
                 elif cmd_type in ('KP', 'KR'):
                     command_queue.put((cmd_type, value_str))
         finally: stop_event.set()
@@ -114,12 +132,14 @@ def handle_client(client_socket):
                 monitor = sct.monitors[1]
                 while not stop_event.is_set():
                     sct_img = sct.grab(monitor)
+                    header = struct.pack("!II", sct_img.width, sct_img.height)
                     img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
                     buffer = io.BytesIO()
-                    img.save(buffer, format='JPEG', quality=75)
+                    img.save(buffer, format='JPEG', quality=70)
                     jpeg_bytes = buffer.getvalue()
-                    len_info = struct.pack("!I", len(jpeg_bytes))
-                    client_socket.sendall(len_info + jpeg_bytes)
+                    payload = header + jpeg_bytes
+                    len_info = struct.pack("!I", len(payload))
+                    client_socket.sendall(len_info + payload)
                     time.sleep(0.03)
         finally: stop_event.set()
     receiver = threading.Thread(target=receive_commands)
@@ -131,6 +151,7 @@ def handle_client(client_socket):
     stop_event.wait()
     print("[-] Un thread client s'est arrêté, fermeture de la connexion.")
     client_socket.close()
+
 def main():
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
@@ -142,14 +163,11 @@ def main():
     try:
         context.load_cert_chain(certfile=cert_path, keyfile=key_path)
     except FileNotFoundError:
-        print(f"[ERREUR] cert.pem ou key.pem non trouvé dans {base_path}. L'exécutable est mal construit.")
-        input("Appuyez sur Entrée pour quitter...")
-        return
-    except Exception as e:
-        print(f"[ERREUR] Impossible de charger les certificats: {e}")
+        print(f"[ERREUR] cert.pem ou key.pem non trouvé.")
         input("Appuyez sur Entrée pour quitter...")
         return
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(('0.0.0.0', 9999))
     server_socket.listen(5)
     print("[*] Serveur sécurisé en écoute sur le port 9999...")

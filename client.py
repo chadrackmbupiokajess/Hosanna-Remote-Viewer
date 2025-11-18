@@ -1,3 +1,7 @@
+# NOUVELLE CORRECTION: Configurer Kivy pour gérer le clic droit
+from kivy.config import Config
+Config.set('input', 'mouse', 'mouse,multitouch_on_demand') # Permet le clic droit comme un événement normal
+
 import socket
 import struct
 import io
@@ -16,13 +20,13 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 
-# --- Widget du bureau distant (avec la logique de votre ancien code) ---
 class RemoteDesktopWidget(Image):
     def __init__(self, **kwargs):
         super(RemoteDesktopWidget, self).__init__(**kwargs)
         self.client_socket = None
         self.pressed_keys = set()
         self._keyboard = None
+        self.server_resolution = (1, 1)
 
     def setup_keyboard(self):
         if not self._keyboard:
@@ -37,44 +41,68 @@ class RemoteDesktopWidget(Image):
             self._keyboard.release()
             self._keyboard = None
 
-    def _keyboard_closed(self):
-        self.release_keyboard()
-
-    def _on_key_down(self, keyboard, keycode, text, modifiers):
-        key_name = keycode[1]
-        if not key_name: return True
-        if key_name not in self.pressed_keys:
-            self.pressed_keys.add(key_name)
-            self.send_command(f"KP,{key_name}")
+    def _keyboard_closed(self): self.release_keyboard()
+    def _on_key_down(self, k, kc, t, m):
+        if kc[1] and kc[1] not in self.pressed_keys:
+            self.pressed_keys.add(kc[1]); self.send_command(f"KP,{kc[1]}")
+        return True
+    def _on_key_up(self, k, kc):
+        if kc[1] and kc[1] in self.pressed_keys:
+            self.pressed_keys.remove(kc[1]); self.send_command(f"KR,{kc[1]}")
         return True
 
-    def _on_key_up(self, keyboard, keycode):
-        key_name = keycode[1]
-        if not key_name: return True
-        if key_name in self.pressed_keys:
-            self.pressed_keys.remove(key_name)
-            self.send_command(f"KR,{key_name}")
-        return True
+    def _get_scaled_coords(self, touch):
+        if not self.texture or self.norm_image_size[0] == 0: return -1, -1
+        img_x = self.center_x - self.norm_image_size[0] / 2
+        img_y = self.center_y - self.norm_image_size[1] / 2
+        if not (img_x <= touch.x < img_x + self.norm_image_size[0] and \
+                img_y <= touch.y < img_y + self.norm_image_size[1]):
+            return -1, -1
+        relative_x = (touch.x - img_x) / self.norm_image_size[0]
+        relative_y = (touch.y - img_y) / self.norm_image_size[1]
+        server_x = int(relative_x * self.server_resolution[0])
+        server_y = int((1 - relative_y) * self.server_resolution[1])
+        return server_x, server_y
+
+    # CORRECTION: Suppression de _get_mapped_button_name
+    # def _get_mapped_button_name(self, kivy_button_name):
+    #     if kivy_button_name == 'left':
+    #         return 'right'
+    #     elif kivy_button_name == 'right':
+    #         return 'left'
+    #     return kivy_button_name
 
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos) and self.texture:
-            btn = "left" if touch.button == 'left' else "right"
-            self.send_command(f"MC,{btn},1") # Press
+        # print(f"[CLIENT DEBUG] on_touch_down - button: {touch.button}, pos: {touch.pos}") # DEBUG
+        if self.collide_point(*touch.pos):
             return True
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
-        if self.collide_point(*touch.pos) and self.texture:
-            btn = "left" if touch.button == 'left' else "right"
-            self.send_command(f"MC,{btn},0") # Release
+        # print(f"[CLIENT DEBUG] on_touch_up - button: {touch.button}, pos: {touch.pos}") # DEBUG
+        x, y = self._get_scaled_coords(touch)
+        if x != -1:
+            # CORRECTION: Utilisation directe de touch.button
+            button_name = touch.button
+            
+            if button_name == 'left':
+                if touch.is_double_tap:
+                    self.send_command(f"DBLCLICK,{x},{y},{button_name}")
+                    print(f"[CLIENT DEBUG] Envoi: DBLCLICK,{x},{y},{button_name}")
+                else:
+                    self.send_command(f"CLICK,{x},{y},{button_name}")
+                    print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{button_name}")
+            elif button_name == 'right':
+                self.send_command(f"CLICK,{x},{y},{button_name}")
+                print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{button_name}")
             return True
         return super().on_touch_up(touch)
 
     def on_touch_move(self, touch):
-        if self.collide_point(*touch.pos) and self.texture:
-            remote_x = int(touch.x * (self.texture.width / self.width))
-            remote_y = int((self.height - touch.y) * (self.texture.height / self.height))
-            self.send_command(f"MV,{remote_x},{remote_y}")
+        # print(f"[CLIENT DEBUG] on_touch_move - button: {touch.button}, pos: {touch.pos}") # DEBUG
+        x, y = self._get_scaled_coords(touch)
+        if x != -1:
+            self.send_command(f"MV,{x},{y}")
             return True
         return super().on_touch_move(touch)
 
@@ -84,10 +112,8 @@ class RemoteDesktopWidget(Image):
                 command_bytes = command_str.encode('utf-8')
                 len_info = struct.pack("!H", len(command_bytes))
                 self.client_socket.sendall(len_info + command_bytes)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+            except (BrokenPipeError, ConnectionResetError): pass
 
-# --- Application principale (avec SSL) ---
 class RemoteViewerApp(App):
     def build(self):
         self.sm = ScreenManager()
@@ -120,11 +146,9 @@ class RemoteViewerApp(App):
         threading.Thread(target=self.receive_frames, args=(host, port), daemon=True).start()
 
     def receive_frames(self, host, port):
-        # Configuration SSL
         context = ssl.create_default_context()
         context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE # Pas de vérification du certificat serveur pour ce test
-
+        context.verify_mode = ssl.CERT_NONE
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client_socket = context.wrap_socket(sock, server_hostname=host)
@@ -139,12 +163,15 @@ class RemoteViewerApp(App):
             try:
                 len_info = self.recv_all(client_socket, 4)
                 if not len_info: break
-                img_size = struct.unpack("!I", len_info)[0]
-                img_bytes = self.recv_all(client_socket, img_size)
-                if not img_bytes: break
+                payload_size = struct.unpack("!I", len_info)[0]
+                payload = self.recv_all(client_socket, payload_size)
+                if not payload: break
+                header_size = struct.calcsize("!II")
+                width, height = struct.unpack("!II", payload[:header_size])
+                self.remote_widget.server_resolution = (width, height)
+                img_bytes = payload[header_size:]
                 Clock.schedule_once(lambda dt, data=img_bytes: self.update_image(data))
-            except (ConnectionResetError, BrokenPipeError):
-                break
+            except (ConnectionResetError, BrokenPipeError): break
         
         client_socket.close()
         self.remote_widget.client_socket = None
