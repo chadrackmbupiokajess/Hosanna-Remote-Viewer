@@ -1,4 +1,4 @@
-('C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+('C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
  'Viewer\\dist\\HosannaServer.exe',
  True,
  False,
@@ -30,31 +30,31 @@
  None,
  None,
  None,
- 'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+ 'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
  'Viewer\\build\\HosannaServer\\HosannaServer.pkg',
  [('pyi-contents-directory _internal', '', 'OPTION'),
   ('PYZ-00.pyz',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\PYZ-00.pyz',
    'PYZ'),
   ('struct',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\localpycs\\struct.pyc',
    'PYMODULE'),
   ('pyimod01_archive',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\localpycs\\pyimod01_archive.pyc',
    'PYMODULE'),
   ('pyimod02_importers',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\localpycs\\pyimod02_importers.pyc',
    'PYMODULE'),
   ('pyimod03_ctypes',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\localpycs\\pyimod03_ctypes.pyc',
    'PYMODULE'),
   ('pyimod04_pywin32',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\localpycs\\pyimod04_pywin32.pyc',
    'PYMODULE'),
   ('pyiboot01_bootstrap',
@@ -70,16 +70,17 @@
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
    'PYSOURCE'),
   ('server',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote Viewer\\server.py',
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
+   'Viewer\\server.py',
    'PYSOURCE'),
   ('python313.dll',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\python313.dll',
    'BINARY'),
-  ('numpy.libs\\msvcp140-263139962577ecda4cd9469ca360a746.dll',
-   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy.libs\\msvcp140-263139962577ecda4cd9469ca360a746.dll',
-   'BINARY'),
   ('numpy.libs\\libscipy_openblas64_-13e2df515630b4a41f92893938845698.dll',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy.libs\\libscipy_openblas64_-13e2df515630b4a41f92893938845698.dll',
+   'BINARY'),
+  ('numpy.libs\\msvcp140-263139962577ecda4cd9469ca360a746.dll',
+   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy.libs\\msvcp140-263139962577ecda4cd9469ca360a746.dll',
    'BINARY'),
   ('select.pyd',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\select.pyd',
@@ -220,10 +221,15 @@
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\libssl-3.dll',
    'BINARY'),
   ('cert.pem',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote Viewer\\cert.pem',
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
+   'Viewer\\cert.pem',
    'DATA'),
   ('key.pem',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote Viewer\\key.pem',
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
+   'Viewer\\key.pem',
+   'DATA'),
+  ('numpy-2.2.6.dist-info\\RECORD',
+   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\RECORD',
    'DATA'),
   ('numpy-2.2.6.dist-info\\REQUESTED',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\REQUESTED',
@@ -231,8 +237,14 @@
   ('numpy-2.2.6.dist-info\\WHEEL',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\WHEEL',
    'DATA'),
+  ('numpy-2.2.6.dist-info\\entry_points.txt',
+   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\entry_points.txt',
+   'DATA'),
   ('numpy-2.2.6.dist-info\\METADATA',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\METADATA',
+   'DATA'),
+  ('numpy-2.2.6.dist-info\\DELVEWHEEL',
+   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\DELVEWHEEL',
    'DATA'),
   ('numpy-2.2.6.dist-info\\LICENSE.txt',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\LICENSE.txt',
@@ -240,23 +252,14 @@
   ('numpy-2.2.6.dist-info\\INSTALLER',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\INSTALLER',
    'DATA'),
-  ('numpy-2.2.6.dist-info\\DELVEWHEEL',
-   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\DELVEWHEEL',
-   'DATA'),
-  ('numpy-2.2.6.dist-info\\entry_points.txt',
-   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\entry_points.txt',
-   'DATA'),
-  ('numpy-2.2.6.dist-info\\RECORD',
-   'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\numpy-2.2.6.dist-info\\RECORD',
-   'DATA'),
   ('base_library.zip',
-   'C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+   'C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
    'Viewer\\build\\HosannaServer\\base_library.zip',
    'DATA')],
  [],
  False,
  False,
- 1763458078,
+ 1763471583,
  [('run.exe',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
    'EXECUTABLE')],

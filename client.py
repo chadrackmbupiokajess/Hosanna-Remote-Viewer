@@ -7,6 +7,9 @@ import struct
 import io
 import threading
 import ssl
+import os
+from tkinter import Tk
+from tkinter.filedialog import askopenfilename
 from kivy.app import App
 from kivy.uix.image import Image
 from kivy.graphics.texture import Texture
@@ -21,6 +24,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.slider import Slider
+from os.path import expanduser
 
 class RemoteDesktopWidget(Image):
     def __init__(self, **kwargs):
@@ -54,12 +58,11 @@ class RemoteDesktopWidget(Image):
         return True
 
     def _get_scaled_coords(self, touch):
-        # --- CORRECTION: Utiliser une méthode fiable pour vérifier l'onglet actif ---
         app = App.get_running_app()
         if not hasattr(app, 'tab_panel') or not hasattr(app, 'desktop_tab'):
-            return -1, -1 # Empêche les erreurs si les widgets ne sont pas encore créés
+            return -1, -1
         if app.tab_panel.current_tab != app.desktop_tab:
-            return -1, -1 # Ne pas traiter le clic si l'onglet Bureau n'est pas actif
+            return -1, -1
 
         if not self.texture or self.norm_image_size[0] == 0: return -1, -1
         img_x = self.center_x - self.norm_image_size[0] / 2
@@ -135,7 +138,6 @@ class RemoteViewerApp(App):
         connect_screen.add_widget(layout)
 
         remote_screen = Screen(name='remote')
-        # --- CORRECTION: Stocker les références au tab_panel et au desktop_tab ---
         self.tab_panel = TabbedPanel(do_default_tab=False)
         
         self.desktop_tab = TabbedPanelItem(text='Bureau')
@@ -158,12 +160,85 @@ class RemoteViewerApp(App):
         settings_tab.add_widget(settings_layout)
         self.tab_panel.add_widget(settings_tab)
 
+        file_tab = TabbedPanelItem(text='Fichiers')
+        file_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        self.file_status_label = Label(text='Prêt pour le transfert.', size_hint_y=None, height=40)
+        
+        open_explorer_button = Button(text="Ouvrir l'explorateur distant", on_press=self.open_remote_explorer)
+        send_file_button = Button(text='Envoyer un fichier au serveur', on_press=self.open_file_chooser)
+        
+        file_layout.add_widget(self.file_status_label)
+        file_layout.add_widget(open_explorer_button)
+        file_layout.add_widget(send_file_button)
+        file_tab.add_widget(file_layout)
+        self.tab_panel.add_widget(file_tab)
+
         self.tab_panel.default_tab = self.desktop_tab
         remote_screen.add_widget(self.tab_panel)
 
         self.sm.add_widget(connect_screen)
         self.sm.add_widget(remote_screen)
         return self.sm
+
+    def open_remote_explorer(self, instance):
+        self.remote_widget.send_command("OPEN_EXPLORER,")
+        self.tab_panel.switch_to(self.desktop_tab)
+
+    def open_file_chooser(self, instance):
+        Tk().withdraw() 
+        file_path = askopenfilename(
+            title="Choisissez un fichier à envoyer",
+            initialdir=expanduser("~")
+        )
+        if file_path:
+            threading.Thread(target=self._send_file_thread, args=(file_path,), daemon=True).start()
+
+    def _send_file_thread(self, file_path):
+        def update_status(text):
+            Clock.schedule_once(lambda dt: setattr(self.file_status_label, 'text', text))
+
+        try:
+            filename = os.path.basename(file_path)
+            filesize = os.path.getsize(file_path)
+            
+            update_status(f"Envoi de {filename}...")
+
+            header_str = f"FILE_TRANSFER,{filename},{filesize}"
+            header_bytes = header_str.encode('utf-8')
+            len_info = struct.pack("!H", len(header_bytes))
+            
+            host = self.ip_input.text
+            file_port = int(self.port_input.text) - 1 
+
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as file_socket:
+                secure_file_socket = context.wrap_socket(file_socket, server_hostname=host)
+                secure_file_socket.connect((host, file_port))
+                
+                secure_file_socket.sendall(len_info + header_bytes)
+
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(4096)
+                        if not chunk:
+                            break
+                        secure_file_socket.sendall(chunk)
+                
+                # --- CORRECTION: Attendre la confirmation du serveur ---
+                secure_file_socket.settimeout(10) # Mettre un timeout de 10 secondes
+                response = secure_file_socket.recv(1024)
+                if response == b"OK":
+                    update_status(f"'{filename}' envoyé avec succès!")
+                else:
+                    update_status(f"Erreur du serveur: {response.decode('utf-8', 'ignore')}")
+
+        except socket.timeout:
+            update_status("Erreur: Le serveur n'a pas répondu.")
+        except Exception as e:
+            update_status(f"Erreur: {e}")
 
     def send_quality_setting(self, quality_value):
         self.remote_widget.send_command(f"QUALITY,{quality_value}")
@@ -191,10 +266,10 @@ class RemoteViewerApp(App):
         
         while True:
             try:
-                len_info = self.recv_all(client_socket, 4)
+                len_info = self.recv_all(self.remote_widget.client_socket, 4)
                 if not len_info: break
                 payload_size = struct.unpack("!I", len_info)[0]
-                payload = self.recv_all(client_socket, payload_size)
+                payload = self.recv_all(self.remote_widget.client_socket, payload_size)
                 if not payload: break
                 header_size = struct.calcsize("!II")
                 width, height = struct.unpack("!II", payload[:header_size])
@@ -203,8 +278,9 @@ class RemoteViewerApp(App):
                 Clock.schedule_once(lambda dt, data=img_bytes: self.update_image(data))
             except (ConnectionResetError, BrokenPipeError): break
         
-        client_socket.close()
-        self.remote_widget.client_socket = None
+        if self.remote_widget.client_socket:
+            self.remote_widget.client_socket.close()
+            self.remote_widget.client_socket = None
         Clock.schedule_once(self.switch_to_connect_screen)
 
     def switch_to_remote_screen(self, dt):
@@ -222,9 +298,13 @@ class RemoteViewerApp(App):
     def recv_all(self, sock, n):
         data = bytearray()
         while len(data) < n:
-            packet = sock.recv(n - len(data))
-            if not packet: return None
-            data.extend(packet)
+            if sock is None: return None
+            try:
+                packet = sock.recv(n - len(data))
+                if not packet: return None
+                data.extend(packet)
+            except (socket.error, AttributeError):
+                return None
         return data
 
     def update_image(self, jpeg_bytes):

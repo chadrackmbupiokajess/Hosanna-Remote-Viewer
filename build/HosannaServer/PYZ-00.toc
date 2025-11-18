@@ -1,4 +1,4 @@
-('C:\\Users\\chadr\\Videos\\Projet\\Hosanna Remote '
+('C:\\Users\\chadr\\Videos\\Projet\\Brouillon\\Hosanna Remote '
  'Viewer\\build\\HosannaServer\\PYZ-00.pyz',
  [('PIL',
    'C:\\Users\\chadr\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PIL\\__init__.py',

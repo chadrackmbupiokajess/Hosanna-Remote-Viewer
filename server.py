@@ -6,6 +6,7 @@ import threading
 import ssl
 import sys
 import os
+import json
 from queue import Queue, Empty
 from PIL import Image
 import mss
@@ -87,7 +88,6 @@ def recv_all(sock, n):
 
 def handle_client(client_socket):
     stop_event = threading.Event()
-    # --- NOUVEAU: Utiliser un dictionnaire partagé pour les paramètres de session
     session_settings = {'jpeg_quality': 70} 
 
     processor_thread = threading.Thread(target=command_processor, args=(stop_event,))
@@ -103,11 +103,11 @@ def handle_client(client_socket):
                 command_data = recv_all(client_socket, cmd_len)
                 if not command_data: break
                 command = command_data.decode('utf-8')
+                
                 parts = command.split(',', 1)
-                if len(parts) < 2: continue
-                cmd_type, value_str = parts[0], parts[1]
+                cmd_type = parts[0]
+                value_str = parts[1] if len(parts) > 1 else ""
 
-                # --- NOUVEAU: Gérer la commande de qualité
                 if cmd_type == 'QUALITY':
                     session_settings['jpeg_quality'] = int(value_str)
                     print(f"[*] Qualité d'image réglée à {value_str} pour ce client.")
@@ -125,6 +125,22 @@ def handle_client(client_socket):
                     command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
                 elif cmd_type in ('KP', 'KR'):
                     command_queue.put((cmd_type, value_str))
+                elif cmd_type == 'OPEN_EXPLORER':
+                    base_path = os.path.abspath("C:/Users/chadr/Documents")
+                    requested_path = os.path.join(base_path, value_str) if value_str else base_path
+                    safe_path = os.path.abspath(requested_path)
+
+                    if not safe_path.startswith(base_path):
+                        print(f"[!] Accès non autorisé demandé à l'explorateur: {safe_path}")
+                    elif not os.path.isdir(safe_path):
+                        print(f"[!] Chemin de l'explorateur non trouvé ou n'est pas un dossier: {safe_path}")
+                    else:
+                        try:
+                            os.startfile(safe_path)
+                            print(f"[*] Ouverture de l'explorateur de fichiers à: {safe_path}")
+                        except Exception as e:
+                            print(f"[!] Erreur lors de l'ouverture de l'explorateur: {e}")
+
         finally: stop_event.set()
 
     def stream_frames():
@@ -136,14 +152,13 @@ def handle_client(client_socket):
                     header = struct.pack("!II", sct_img.width, sct_img.height)
                     img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
                     buffer = io.BytesIO()
-                    # --- NOUVEAU: Utiliser la qualité de la session
                     quality = session_settings['jpeg_quality']
                     img.save(buffer, format='JPEG', quality=quality)
                     jpeg_bytes = buffer.getvalue()
                     payload = header + jpeg_bytes
                     len_info = struct.pack("!I", len(payload))
                     client_socket.sendall(len_info + payload)
-                    time.sleep(0.03) # Garder une petite pause pour ne pas surcharger le CPU
+                    time.sleep(0.03)
         finally: stop_event.set()
 
     receiver = threading.Thread(target=receive_commands)
@@ -155,6 +170,96 @@ def handle_client(client_socket):
     stop_event.wait()
     print("[-] Un thread client s'est arrêté, fermeture de la connexion.")
     client_socket.close()
+
+def handle_file_transfer(client_socket):
+    try:
+        print("[+] Connexion de transfert de fichier acceptée.")
+        len_info = recv_all(client_socket, 2)
+        if not len_info: return
+        
+        header_len = struct.unpack("!H", len_info)[0]
+        header_data = recv_all(client_socket, header_len)
+        if not header_data: return
+
+        header_str = header_data.decode('utf-8')
+        parts = header_str.split(',')
+        if len(parts) != 3 or parts[0] != 'FILE_TRANSFER':
+            print(f"[!] En-tête de transfert de fichier invalide: {header_str}")
+            return
+
+        _, filename, filesize_str = parts
+        filesize = int(filesize_str)
+        filename = os.path.basename(filename)
+        
+        # --- CORRECTION: Logique de chemin de sauvegarde améliorée ---
+        save_base_path = None
+        try:
+            # Méthode la plus fiable pour Windows (indépendante de la langue)
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders')
+            # La valeur {374DE290-123F-4565-9164-39C4925E467B} correspond au dossier Téléchargements
+            downloads_folder, _ = winreg.QueryValueEx(key, '{374DE290-123F-4565-9164-39C4925E467B}')
+            winreg.CloseKey(key)
+            save_base_path = downloads_folder
+            print(f"[*] Dossier de téléchargement trouvé via le registre: {save_base_path}")
+        except Exception as e:
+            print(f"[!] Avertissement: Impossible de trouver le dossier Téléchargements via le registre ({e}).")
+            print("[!] Utilisation du répertoire du script comme emplacement de secours.")
+            if getattr(sys, 'frozen', False):
+                save_base_path = os.path.dirname(sys.executable)
+            else:
+                save_base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        reception_path = os.path.join(save_base_path, "Hosanna Tv Reception")
+        
+        if not os.path.exists(reception_path):
+            os.makedirs(reception_path)
+        
+        save_path = os.path.join(reception_path, filename)
+        print(f"[*] Réception de '{filename}' ({filesize} octets) vers '{save_path}'")
+        
+        bytes_received = 0
+        with open(save_path, 'wb') as f:
+            while bytes_received < filesize:
+                chunk_size = min(4096, filesize - bytes_received)
+                chunk = recv_all(client_socket, chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                bytes_received += len(chunk)
+        
+        if bytes_received == filesize:
+            print(f"[+] Fichier '{filename}' reçu avec succès. Envoi de la confirmation...")
+            client_socket.sendall(b"OK")
+        else:
+            print(f"[!] Erreur de transfert pour '{filename}'. Reçu {bytes_received}/{filesize} octets.")
+            client_socket.sendall(b"ERROR")
+
+    except Exception as e:
+        print(f"[!!!] ERREUR CRITIQUE lors du transfert de fichier: {e}", file=sys.stderr)
+        try:
+            client_socket.sendall(b"CRITICAL_ERROR")
+        except Exception as send_err:
+            print(f"(Impossible d'envoyer le message d'erreur au client: {send_err})")
+    finally:
+        client_socket.close()
+        print("[-] Connexion de transfert de fichier fermée.")
+
+def file_server(host, port, context):
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind((host, port))
+    server_socket.listen(5)
+    print(f"[*] Serveur de fichiers en écoute sur le port {port}...")
+
+    while True:
+        try:
+            client, addr = server_socket.accept()
+            ssl_socket = context.wrap_socket(client, server_side=True)
+            threading.Thread(target=handle_file_transfer, args=(ssl_socket,), daemon=True).start()
+        except Exception as e:
+            print(f"[!] Erreur sur le serveur de fichiers: {e}")
+            break
 
 def main():
     if getattr(sys, 'frozen', False):
@@ -170,11 +275,17 @@ def main():
         print(f"[ERREUR] cert.pem ou key.pem non trouvé.")
         input("Appuyez sur Entrée pour quitter...")
         return
+
+    main_port = 9999
+    file_port = main_port - 1
+    file_server_thread = threading.Thread(target=file_server, args=('0.0.0.0', file_port, context), daemon=True)
+    file_server_thread.start()
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(('0.0.0.0', 9999))
+    server_socket.bind(('0.0.0.0', main_port))
     server_socket.listen(5)
-    print("[*] Serveur sécurisé en écoute sur le port 9999...")
+    print(f"[*] Serveur sécurisé en écoute sur le port {main_port}...")
     try:
         while True:
             client, addr = server_socket.accept()
