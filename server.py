@@ -7,6 +7,7 @@ import ssl
 import sys
 import os
 import json
+import ctypes
 from queue import Queue, Empty
 from PIL import Image
 import mss
@@ -81,9 +82,15 @@ def command_processor(stop_event):
 def recv_all(sock, n):
     data = bytearray()
     while len(data) < n:
-        packet = sock.recv(n - len(data))
-        if not packet: return None
-        data.extend(packet)
+        try:
+            packet = sock.recv(n - len(data))
+            if not packet: return None
+            data.extend(packet)
+        except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
+            # Non-blocking socket would wait here, but we are blocking
+            continue
+        except (ConnectionResetError, BrokenPipeError):
+            return None # Client disconnected
     return data
 
 def handle_client(client_socket):
@@ -125,23 +132,8 @@ def handle_client(client_socket):
                     command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
                 elif cmd_type in ('KP', 'KR'):
                     command_queue.put((cmd_type, value_str))
-                elif cmd_type == 'OPEN_EXPLORER':
-                    base_path = os.path.abspath("C:/Users/chadr/Documents")
-                    requested_path = os.path.join(base_path, value_str) if value_str else base_path
-                    safe_path = os.path.abspath(requested_path)
-
-                    if not safe_path.startswith(base_path):
-                        print(f"[!] Accès non autorisé demandé à l'explorateur: {safe_path}")
-                    elif not os.path.isdir(safe_path):
-                        print(f"[!] Chemin de l'explorateur non trouvé ou n'est pas un dossier: {safe_path}")
-                    else:
-                        try:
-                            os.startfile(safe_path)
-                            print(f"[*] Ouverture de l'explorateur de fichiers à: {safe_path}")
-                        except Exception as e:
-                            print(f"[!] Erreur lors de l'ouverture de l'explorateur: {e}")
-
-        finally: stop_event.set()
+        finally:
+            stop_event.set()
 
     def stream_frames():
         try:
@@ -159,7 +151,10 @@ def handle_client(client_socket):
                     len_info = struct.pack("!I", len(payload))
                     client_socket.sendall(len_info + payload)
                     time.sleep(0.03)
-        finally: stop_event.set()
+        except (BrokenPipeError, ConnectionResetError):
+            print("[-] Le client de bureau a fermé la connexion.")
+        finally:
+            stop_event.set()
 
     receiver = threading.Thread(target=receive_commands)
     streamer = threading.Thread(target=stream_frames)
@@ -171,9 +166,27 @@ def handle_client(client_socket):
     print("[-] Un thread client s'est arrêté, fermeture de la connexion.")
     client_socket.close()
 
+def get_downloads_folder():
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders')
+        downloads_folder, _ = winreg.QueryValueEx(key, '{374DE290-123F-4565-9164-39C4925E467B}')
+        winreg.CloseKey(key)
+        return downloads_folder
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), "Downloads")
+
+def get_available_drives():
+    drives = []
+    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+    for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+        if bitmask & 1:
+            drives.append(f"{letter}:\\")
+        bitmask >>= 1
+    return drives
+
 def handle_file_transfer(client_socket):
     try:
-        print("[+] Connexion de transfert de fichier acceptée.")
         len_info = recv_all(client_socket, 2)
         if not len_info: return
         
@@ -182,68 +195,100 @@ def handle_file_transfer(client_socket):
         if not header_data: return
 
         header_str = header_data.decode('utf-8')
-        parts = header_str.split(',')
-        if len(parts) != 3 or parts[0] != 'FILE_TRANSFER':
-            print(f"[!] En-tête de transfert de fichier invalide: {header_str}")
-            return
+        parts = header_str.split(',', 1)
+        command = parts[0]
+        
+        if command == 'UPLOAD':
+            _, filename, filesize_str = header_str.split(',')
+            filesize = int(filesize_str)
+            filename = os.path.basename(filename)
+            
+            downloads_path = get_downloads_folder()
+            reception_path = os.path.join(downloads_path, "Hosanna Tv Reception")
+            if not os.path.exists(reception_path):
+                os.makedirs(reception_path)
+            
+            save_path = os.path.join(reception_path, filename)
+            print(f"[*] Réception de '{filename}' ({filesize} octets) vers '{save_path}'")
+            
+            bytes_received = 0
+            interrupted = False
+            try:
+                with open(save_path, 'wb') as f:
+                    while bytes_received < filesize:
+                        chunk_size = min(65536, filesize - bytes_received)
+                        chunk = recv_all(client_socket, chunk_size)
+                        if not chunk:
+                            interrupted = True
+                            break
+                        f.write(chunk)
+                        bytes_received += len(chunk)
+            except Exception as e:
+                interrupted = True
+                print(f"[!] Erreur pendant l'écriture du fichier {filename}: {e}")
 
-        _, filename, filesize_str = parts
-        filesize = int(filesize_str)
-        filename = os.path.basename(filename)
-        
-        # --- CORRECTION: Logique de chemin de sauvegarde améliorée ---
-        save_base_path = None
-        try:
-            # Méthode la plus fiable pour Windows (indépendante de la langue)
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders')
-            # La valeur {374DE290-123F-4565-9164-39C4925E467B} correspond au dossier Téléchargements
-            downloads_folder, _ = winreg.QueryValueEx(key, '{374DE290-123F-4565-9164-39C4925E467B}')
-            winreg.CloseKey(key)
-            save_base_path = downloads_folder
-            print(f"[*] Dossier de téléchargement trouvé via le registre: {save_base_path}")
-        except Exception as e:
-            print(f"[!] Avertissement: Impossible de trouver le dossier Téléchargements via le registre ({e}).")
-            print("[!] Utilisation du répertoire du script comme emplacement de secours.")
-            if getattr(sys, 'frozen', False):
-                save_base_path = os.path.dirname(sys.executable)
+            if interrupted:
+                print(f"[!] Transfert de '{filename}' interrompu. Nettoyage.")
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+            elif bytes_received == filesize:
+                print(f"[*] Fichier '{filename}' reçu avec succès.")
+                client_socket.sendall(b"OK")
+
+        elif command == 'LIST_DIR':
+            req_path = parts[1]
+            response_data = None
+
+            if not req_path:
+                entries = [{'name': d, 'is_dir': True, 'size': 0} for d in get_available_drives()]
+                response_data = json.dumps({'path': '', 'entries': entries}).encode('utf-8')
             else:
-                save_base_path = os.path.dirname(os.path.abspath(__file__))
-        
-        reception_path = os.path.join(save_base_path, "Hosanna Tv Reception")
-        
-        if not os.path.exists(reception_path):
-            os.makedirs(reception_path)
-        
-        save_path = os.path.join(reception_path, filename)
-        print(f"[*] Réception de '{filename}' ({filesize} octets) vers '{save_path}'")
-        
-        bytes_received = 0
-        with open(save_path, 'wb') as f:
-            while bytes_received < filesize:
-                chunk_size = min(4096, filesize - bytes_received)
-                chunk = recv_all(client_socket, chunk_size)
-                if not chunk:
-                    break
-                f.write(chunk)
-                bytes_received += len(chunk)
-        
-        if bytes_received == filesize:
-            print(f"[+] Fichier '{filename}' reçu avec succès. Envoi de la confirmation...")
-            client_socket.sendall(b"OK")
-        else:
-            print(f"[!] Erreur de transfert pour '{filename}'. Reçu {bytes_received}/{filesize} octets.")
-            client_socket.sendall(b"ERROR")
+                entries = []
+                error_msg = None
+                try:
+                    for entry in os.scandir(req_path):
+                        try:
+                            is_dir = entry.is_dir()
+                            size = 0 if is_dir else entry.stat().st_size
+                            entries.append({'name': entry.name, 'is_dir': is_dir, 'size': size})
+                        except (OSError, PermissionError):
+                            continue
+                except (OSError, PermissionError):
+                    error_msg = "Accès refusé"
+                
+                entries.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+                response_dict = {'path': req_path, 'entries': entries, 'error': error_msg}
+                response_data = json.dumps(response_dict).encode('utf-8')
+            
+            if response_data:
+                len_prefix = struct.pack("!I", len(response_data))
+                client_socket.sendall(len_prefix + response_data)
+
+        elif command == 'DOWNLOAD':
+            req_path = parts[1]
+            if not os.path.isfile(req_path):
+                client_socket.sendall(struct.pack("!Q", 0))
+                print(f"[!] Tentative de téléchargement de fichier inexistant: {req_path}")
+            else:
+                try:
+                    filesize = os.path.getsize(req_path)
+                    client_socket.sendall(struct.pack("!Q", filesize))
+                    print(f"[*] Envoi de '{req_path}' ({filesize} octets)")
+                    with open(req_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(65536)
+                            if not chunk: break
+                            client_socket.sendall(chunk)
+                    print(f"[*] Envoi de '{req_path}' terminé.")
+                except (BrokenPipeError, ConnectionResetError):
+                    print(f"[*] Connexion fermée par le client pendant l'envoi de '{req_path}'. Annulé.")
+                except Exception as e:
+                    print(f"[!] Erreur pendant l'envoi du fichier '{req_path}': {e}")
 
     except Exception as e:
-        print(f"[!!!] ERREUR CRITIQUE lors du transfert de fichier: {e}", file=sys.stderr)
-        try:
-            client_socket.sendall(b"CRITICAL_ERROR")
-        except Exception as send_err:
-            print(f"(Impossible d'envoyer le message d'erreur au client: {send_err})")
+        print(f"[!!!] ERREUR CRITIQUE transfert: {e}", file=sys.stderr)
     finally:
         client_socket.close()
-        print("[-] Connexion de transfert de fichier fermée.")
 
 def file_server(host, port, context):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
