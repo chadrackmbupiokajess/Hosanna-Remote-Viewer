@@ -1,6 +1,6 @@
-# NOUVELLE CORRECTION: Configurer Kivy pour gérer le clic droit
+# Configurer Kivy pour gérer le clic droit
 from kivy.config import Config
-Config.set('input', 'mouse', 'mouse,multitouch_on_demand') # Permet le clic droit comme un événement normal
+Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
 import socket
 import struct
@@ -64,42 +64,51 @@ class RemoteDesktopWidget(Image):
         server_y = int((1 - relative_y) * self.server_resolution[1])
         return server_x, server_y
 
-    # CORRECTION: Suppression de _get_mapped_button_name
-    # def _get_mapped_button_name(self, kivy_button_name):
-    #     if kivy_button_name == 'left':
-    #         return 'right'
-    #     elif kivy_button_name == 'right':
-    #         return 'left'
-    #     return kivy_button_name
+    # CORRECTION: Suppression de la logique d'inversion dans le mappage des boutons
+    def _get_mapped_button_name(self, kivy_button_name):
+        return kivy_button_name # On fait confiance à Kivy pour rapporter le bon bouton
 
+    # NOUVELLE LOGIQUE POUR GLISSER-DÉPOSER
     def on_touch_down(self, touch):
-        # print(f"[CLIENT DEBUG] on_touch_down - button: {touch.button}, pos: {touch.pos}") # DEBUG
-        if self.collide_point(*touch.pos):
+        x, y = self._get_scaled_coords(touch)
+        if x != -1:
+            touch.ud['initial_pos'] = touch.pos
+            mapped_button = self._get_mapped_button_name(touch.button)
+            self.send_command(f"MC,{mapped_button},1")
+            print(f"[CLIENT DEBUG] Envoi: MC,{mapped_button},1 (down)") # <-- DEBUG
             return True
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
-        # print(f"[CLIENT DEBUG] on_touch_up - button: {touch.button}, pos: {touch.pos}") # DEBUG
         x, y = self._get_scaled_coords(touch)
         if x != -1:
-            # CORRECTION: Utilisation directe de touch.button
-            button_name = touch.button
-            
-            if button_name == 'left':
-                if touch.is_double_tap:
-                    self.send_command(f"DBLCLICK,{x},{y},{button_name}")
-                    print(f"[CLIENT DEBUG] Envoi: DBLCLICK,{x},{y},{button_name}")
-                else:
-                    self.send_command(f"CLICK,{x},{y},{button_name}")
-                    print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{button_name}")
-            elif button_name == 'right':
-                self.send_command(f"CLICK,{x},{y},{button_name}")
-                print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{button_name}")
+            if 'initial_pos' not in touch.ud:
+                touch.ud['initial_pos'] = touch.pos
+
+            move_distance = (touch.x - touch.ud['initial_pos'][0])**2 + \
+                            (touch.y - touch.ud['initial_pos'][1])**2
+
+            if move_distance < 25:
+                mapped_button = self._get_mapped_button_name(touch.button)
+                if mapped_button == 'left':
+                    if touch.is_double_tap:
+                        self.send_command(f"DBLCLICK,{x},{y},{mapped_button}")
+                        print(f"[CLIENT DEBUG] Envoi: DBLCLICK,{x},{y},{mapped_button}")
+                    else:
+                        self.send_command(f"CLICK,{x},{y},{mapped_button}")
+                        print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{mapped_button}")
+                elif mapped_button == 'right':
+                    self.send_command(f"CLICK,{x},{y},{mapped_button}")
+                    print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{mapped_button}")
+            else:
+                mapped_button = self._get_mapped_button_name(touch.button)
+                self.send_command(f"MC,{mapped_button},0")
+                print(f"[CLIENT DEBUG] Envoi: MC,{mapped_button},0 (up - drag)") # <-- DEBUG
+
             return True
         return super().on_touch_up(touch)
 
     def on_touch_move(self, touch):
-        # print(f"[CLIENT DEBUG] on_touch_move - button: {touch.button}, pos: {touch.pos}") # DEBUG
         x, y = self._get_scaled_coords(touch)
         if x != -1:
             self.send_command(f"MV,{x},{y}")
