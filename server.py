@@ -47,40 +47,31 @@ def command_processor(stop_event):
             for cmd in commands:
                 if cmd[0] == 'MV': last_move = cmd
                 else: other_commands.append(cmd)
-
+            
             if last_move:
                 mouse_ctrl.position = last_move[1]
-                # print(f"[SERVER DEBUG] Souris déplacée à {last_move[1]}") # Décommenter pour débogage
 
             for cmd_type, value in other_commands:
                 if cmd_type == 'MC':
                     btn_name, pressed = value
                     button = Button.left if btn_name == 'left' else Button.right
-                    if pressed:
-                        mouse_ctrl.press(button)
-                        # print(f"[SERVER DEBUG] Bouton {btn_name} pressé.") # Décommenter pour débogage
-                    else:
-                        mouse_ctrl.release(button)
-                        # print(f"[SERVER DEBUG] Bouton {btn_name} relâché.") # Décommenter pour débogage
+                    if pressed: mouse_ctrl.press(button)
+                    else: mouse_ctrl.release(button)
                 elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
                     x, y, btn_name = value
                     mouse_ctrl.position = (x, y)
                     button = Button.left if btn_name == 'left' else Button.right
                     click_count = 2 if cmd_type == 'DBLCLICK' else 1
                     mouse_ctrl.click(button, click_count)
-                    # print(f"[SERVER DEBUG] {cmd_type} sur ({x},{y}) avec bouton {btn_name}, count={click_count}") # Décommenter pour débogage
-                elif cmd_type == 'SCROLL': # NOUVEAU: Gérer la commande SCROLL
+                elif cmd_type == 'SCROLL':
                     x_offset, y_offset = value
                     mouse_ctrl.scroll(x_offset, y_offset)
-                    print(f"[SERVER DEBUG] Molette défilée: ({x_offset}, {y_offset})") # <-- DEBUG
                 elif cmd_type == 'KP':
                     key = KEY_MAP.get(value, value)
                     keyboard_ctrl.press(key)
-                    # print(f"[SERVER DEBUG] Touche {value} pressée.") # Décommenter pour débogage
                 elif cmd_type == 'KR':
                     key = KEY_MAP.get(value, value)
                     keyboard_ctrl.release(key)
-                    # print(f"[SERVER DEBUG] Touche {value} relâchée.") # Décommenter pour débogage
         except Empty:
             continue
         except Exception as e:
@@ -96,9 +87,13 @@ def recv_all(sock, n):
 
 def handle_client(client_socket):
     stop_event = threading.Event()
+    # --- NOUVEAU: Utiliser un dictionnaire partagé pour les paramètres de session
+    session_settings = {'jpeg_quality': 70} 
+
     processor_thread = threading.Thread(target=command_processor, args=(stop_event,))
     processor_thread.daemon = True
     processor_thread.start()
+
     def receive_commands():
         try:
             while not stop_event.is_set():
@@ -108,12 +103,15 @@ def handle_client(client_socket):
                 command_data = recv_all(client_socket, cmd_len)
                 if not command_data: break
                 command = command_data.decode('utf-8')
-                # print(f"[SERVER DEBUG] Commande brute reçue: {command}") # Décommenter pour débogage
                 parts = command.split(',', 1)
                 if len(parts) < 2: continue
                 cmd_type, value_str = parts[0], parts[1]
 
-                if cmd_type == 'MV':
+                # --- NOUVEAU: Gérer la commande de qualité
+                if cmd_type == 'QUALITY':
+                    session_settings['jpeg_quality'] = int(value_str)
+                    print(f"[*] Qualité d'image réglée à {value_str} pour ce client.")
+                elif cmd_type == 'MV':
                     x, y = value_str.split(',')
                     command_queue.put(('MV', (int(x), int(y))))
                 elif cmd_type == 'MC':
@@ -122,12 +120,13 @@ def handle_client(client_socket):
                 elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
                     x, y, btn = value_str.split(',')
                     command_queue.put((cmd_type, (int(x), int(y), btn)))
-                elif cmd_type == 'SCROLL': # NOUVEAU: Parser la commande SCROLL
+                elif cmd_type == 'SCROLL':
                     x_offset, y_offset = value_str.split(',')
                     command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
                 elif cmd_type in ('KP', 'KR'):
                     command_queue.put((cmd_type, value_str))
         finally: stop_event.set()
+
     def stream_frames():
         try:
             with mss.mss() as sct:
@@ -137,13 +136,16 @@ def handle_client(client_socket):
                     header = struct.pack("!II", sct_img.width, sct_img.height)
                     img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
                     buffer = io.BytesIO()
-                    img.save(buffer, format='JPEG', quality=70)
+                    # --- NOUVEAU: Utiliser la qualité de la session
+                    quality = session_settings['jpeg_quality']
+                    img.save(buffer, format='JPEG', quality=quality)
                     jpeg_bytes = buffer.getvalue()
                     payload = header + jpeg_bytes
                     len_info = struct.pack("!I", len(payload))
                     client_socket.sendall(len_info + payload)
-                    time.sleep(0.03)
+                    time.sleep(0.03) # Garder une petite pause pour ne pas surcharger le CPU
         finally: stop_event.set()
+
     receiver = threading.Thread(target=receive_commands)
     streamer = threading.Thread(target=stream_frames)
     receiver.daemon = True

@@ -19,6 +19,8 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
+from kivy.uix.slider import Slider
 
 class RemoteDesktopWidget(Image):
     def __init__(self, **kwargs):
@@ -52,6 +54,13 @@ class RemoteDesktopWidget(Image):
         return True
 
     def _get_scaled_coords(self, touch):
+        # --- CORRECTION: Utiliser une méthode fiable pour vérifier l'onglet actif ---
+        app = App.get_running_app()
+        if not hasattr(app, 'tab_panel') or not hasattr(app, 'desktop_tab'):
+            return -1, -1 # Empêche les erreurs si les widgets ne sont pas encore créés
+        if app.tab_panel.current_tab != app.desktop_tab:
+            return -1, -1 # Ne pas traiter le clic si l'onglet Bureau n'est pas actif
+
         if not self.texture or self.norm_image_size[0] == 0: return -1, -1
         img_x = self.center_x - self.norm_image_size[0] / 2
         img_y = self.center_y - self.norm_image_size[1] / 2
@@ -65,54 +74,33 @@ class RemoteDesktopWidget(Image):
         return server_x, server_y
 
     def _get_mapped_button_name(self, kivy_button_name):
-        return kivy_button_name # On fait confiance à Kivy pour rapporter le bon bouton
+        return kivy_button_name
 
     def on_touch_down(self, touch):
-        # print(f"[CLIENT DEBUG] on_touch_down - button: {touch.button}, pos: {touch.pos}") # <-- DEBUG
         x, y = self._get_scaled_coords(touch)
         if x != -1:
-            # Gérer le défilement de la molette
             if touch.is_mouse_scrolling:
-                # Kivy's scroll_y est 1 pour haut, -1 pour bas.
-                # pynput's scroll attend (x_offset, y_offset)
-                # Pour le défilement vertical, x_offset est 0, y_offset est touch.scroll_y
                 self.send_command(f"SCROLL,0,{int(touch.scroll_y)}")
-                print(f"[CLIENT DEBUG] Envoi: SCROLL,0,{int(touch.scroll_y)}")
-                return True # Consommer l'événement
-
-            # CORRIGÉ: Envoyer la position avant d'envoyer l'événement de clic
+                return True
             self.send_command(f"MV,{x},{y}")
-            
-            # Envoyer la commande "press"
             touch.ud['initial_pos'] = touch.pos
             mapped_button = self._get_mapped_button_name(touch.button)
             self.send_command(f"MC,{mapped_button},1")
-            print(f"[CLIENT DEBUG] Envoi: MV,{x},{y} puis MC,{mapped_button},1 (down)")
             return True
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
-        # print(f"[CLIENT DEBUG] on_touch_up - button: {touch.button}, pos: {touch.pos}") # <-- DEBUG
         x, y = self._get_scaled_coords(touch)
         if x != -1:
             mapped_button = self._get_mapped_button_name(touch.button)
-
-            # CORRIGÉ: La logique de clic est simplifiée pour envoyer un relâchement simple,
-            # sauf pour le double-clic qui reste un cas spécial.
             if mapped_button == 'left' and touch.is_double_tap:
                 self.send_command(f"DBLCLICK,{x},{y},{mapped_button}")
-                print(f"[CLIENT DEBUG] Envoi: DBLCLICK,{x},{y},{mapped_button}")
             else:
-                # Pour un clic simple (gauche/droit) ou la fin d'un glisser,
-                # on envoie seulement la commande "release".
                 self.send_command(f"MC,{mapped_button},0")
-                print(f"[CLIENT DEBUG] Envoi: MC,{mapped_button},0 (up)")
-
             return True
         return super().on_touch_up(touch)
 
     def on_touch_move(self, touch):
-        # print(f"[CLIENT DEBUG] on_touch_move - button: {touch.button}, pos: {touch.pos}") # <-- DEBUG (peut être très verbeux)
         x, y = self._get_scaled_coords(touch)
         if x != -1:
             self.send_command(f"MV,{x},{y}")
@@ -145,12 +133,40 @@ class RemoteViewerApp(App):
         layout.add_widget(connect_button)
         layout.add_widget(self.status_label)
         connect_screen.add_widget(layout)
+
         remote_screen = Screen(name='remote')
+        # --- CORRECTION: Stocker les références au tab_panel et au desktop_tab ---
+        self.tab_panel = TabbedPanel(do_default_tab=False)
+        
+        self.desktop_tab = TabbedPanelItem(text='Bureau')
         self.remote_widget = RemoteDesktopWidget()
-        remote_screen.add_widget(self.remote_widget)
+        self.desktop_tab.add_widget(self.remote_widget)
+        self.tab_panel.add_widget(self.desktop_tab)
+
+        settings_tab = TabbedPanelItem(text='Paramètres')
+        settings_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        quality_label = Label(text='Qualité de l\'image: 70%', size_hint_y=None, height=40)
+        quality_slider = Slider(min=10, max=95, value=70, step=5)
+        
+        def on_quality_change(instance, value):
+            quality_label.text = f"Qualité de l'image: {int(value)}%"
+            self.send_quality_setting(int(value))
+
+        quality_slider.bind(value=on_quality_change)
+        settings_layout.add_widget(quality_label)
+        settings_layout.add_widget(quality_slider)
+        settings_tab.add_widget(settings_layout)
+        self.tab_panel.add_widget(settings_tab)
+
+        self.tab_panel.default_tab = self.desktop_tab
+        remote_screen.add_widget(self.tab_panel)
+
         self.sm.add_widget(connect_screen)
         self.sm.add_widget(remote_screen)
         return self.sm
+
+    def send_quality_setting(self, quality_value):
+        self.remote_widget.send_command(f"QUALITY,{quality_value}")
 
     def connect_to_server(self, instance):
         host = self.ip_input.text
@@ -167,6 +183,7 @@ class RemoteViewerApp(App):
             client_socket = context.wrap_socket(sock, server_hostname=host)
             client_socket.connect((host, port))
             self.remote_widget.client_socket = client_socket
+            self.send_quality_setting(70)
             Clock.schedule_once(self.switch_to_remote_screen)
         except Exception as e:
             Clock.schedule_once(lambda dt, err=str(e): self.show_connection_error(err))
