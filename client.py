@@ -24,6 +24,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.slider import Slider
+from kivy.uix.progressbar import ProgressBar
 from os.path import expanduser
 
 class RemoteDesktopWidget(Image):
@@ -164,10 +165,14 @@ class RemoteViewerApp(App):
         file_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
         self.file_status_label = Label(text='Prêt pour le transfert.', size_hint_y=None, height=40)
         
+        # --- NOUVEAU: Barre de progression ---
+        self.progress_bar = ProgressBar(max=100, size_hint_y=None, height=20)
+        
         open_explorer_button = Button(text="Ouvrir l'explorateur distant", on_press=self.open_remote_explorer)
         send_file_button = Button(text='Envoyer un fichier au serveur', on_press=self.open_file_chooser)
         
         file_layout.add_widget(self.file_status_label)
+        file_layout.add_widget(self.progress_bar) # Ajout de la barre
         file_layout.add_widget(open_explorer_button)
         file_layout.add_widget(send_file_button)
         file_tab.add_widget(file_layout)
@@ -196,12 +201,17 @@ class RemoteViewerApp(App):
     def _send_file_thread(self, file_path):
         def update_status(text):
             Clock.schedule_once(lambda dt: setattr(self.file_status_label, 'text', text))
+        
+        # --- NOUVEAU: Fonction pour mettre à jour la barre de progression ---
+        def update_progress(value):
+            Clock.schedule_once(lambda dt: setattr(self.progress_bar, 'value', value))
 
         try:
             filename = os.path.basename(file_path)
             filesize = os.path.getsize(file_path)
             
             update_status(f"Envoi de {filename}...")
+            update_progress(0)
 
             header_str = f"FILE_TRANSFER,{filename},{filesize}"
             header_bytes = header_str.encode('utf-8')
@@ -221,24 +231,32 @@ class RemoteViewerApp(App):
                 secure_file_socket.sendall(len_info + header_bytes)
 
                 with open(file_path, 'rb') as f:
+                    bytes_sent = 0
                     while True:
                         chunk = f.read(4096)
                         if not chunk:
                             break
                         secure_file_socket.sendall(chunk)
+                        # --- NOUVEAU: Mise à jour de la progression ---
+                        bytes_sent += len(chunk)
+                        progress = (bytes_sent / filesize) * 100
+                        update_progress(progress)
                 
-                # --- CORRECTION: Attendre la confirmation du serveur ---
-                secure_file_socket.settimeout(10) # Mettre un timeout de 10 secondes
+                secure_file_socket.settimeout(10)
                 response = secure_file_socket.recv(1024)
                 if response == b"OK":
                     update_status(f"'{filename}' envoyé avec succès!")
+                    update_progress(100)
                 else:
                     update_status(f"Erreur du serveur: {response.decode('utf-8', 'ignore')}")
+                    update_progress(0)
 
         except socket.timeout:
             update_status("Erreur: Le serveur n'a pas répondu.")
+            update_progress(0)
         except Exception as e:
             update_status(f"Erreur: {e}")
+            update_progress(0)
 
     def send_quality_setting(self, quality_value):
         self.remote_widget.send_command(f"QUALITY,{quality_value}")
