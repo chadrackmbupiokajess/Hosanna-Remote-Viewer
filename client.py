@@ -64,51 +64,55 @@ class RemoteDesktopWidget(Image):
         server_y = int((1 - relative_y) * self.server_resolution[1])
         return server_x, server_y
 
-    # CORRECTION: Suppression de la logique d'inversion dans le mappage des boutons
     def _get_mapped_button_name(self, kivy_button_name):
         return kivy_button_name # On fait confiance à Kivy pour rapporter le bon bouton
 
-    # NOUVELLE LOGIQUE POUR GLISSER-DÉPOSER
     def on_touch_down(self, touch):
+        # print(f"[CLIENT DEBUG] on_touch_down - button: {touch.button}, pos: {touch.pos}") # <-- DEBUG
         x, y = self._get_scaled_coords(touch)
         if x != -1:
+            # Gérer le défilement de la molette
+            if touch.is_mouse_scrolling:
+                # Kivy's scroll_y est 1 pour haut, -1 pour bas.
+                # pynput's scroll attend (x_offset, y_offset)
+                # Pour le défilement vertical, x_offset est 0, y_offset est touch.scroll_y
+                self.send_command(f"SCROLL,0,{int(touch.scroll_y)}")
+                print(f"[CLIENT DEBUG] Envoi: SCROLL,0,{int(touch.scroll_y)}")
+                return True # Consommer l'événement
+
+            # CORRIGÉ: Envoyer la position avant d'envoyer l'événement de clic
+            self.send_command(f"MV,{x},{y}")
+            
+            # Envoyer la commande "press"
             touch.ud['initial_pos'] = touch.pos
             mapped_button = self._get_mapped_button_name(touch.button)
             self.send_command(f"MC,{mapped_button},1")
-            print(f"[CLIENT DEBUG] Envoi: MC,{mapped_button},1 (down)") # <-- DEBUG
+            print(f"[CLIENT DEBUG] Envoi: MV,{x},{y} puis MC,{mapped_button},1 (down)")
             return True
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
+        # print(f"[CLIENT DEBUG] on_touch_up - button: {touch.button}, pos: {touch.pos}") # <-- DEBUG
         x, y = self._get_scaled_coords(touch)
         if x != -1:
-            if 'initial_pos' not in touch.ud:
-                touch.ud['initial_pos'] = touch.pos
+            mapped_button = self._get_mapped_button_name(touch.button)
 
-            move_distance = (touch.x - touch.ud['initial_pos'][0])**2 + \
-                            (touch.y - touch.ud['initial_pos'][1])**2
-
-            if move_distance < 25:
-                mapped_button = self._get_mapped_button_name(touch.button)
-                if mapped_button == 'left':
-                    if touch.is_double_tap:
-                        self.send_command(f"DBLCLICK,{x},{y},{mapped_button}")
-                        print(f"[CLIENT DEBUG] Envoi: DBLCLICK,{x},{y},{mapped_button}")
-                    else:
-                        self.send_command(f"CLICK,{x},{y},{mapped_button}")
-                        print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{mapped_button}")
-                elif mapped_button == 'right':
-                    self.send_command(f"CLICK,{x},{y},{mapped_button}")
-                    print(f"[CLIENT DEBUG] Envoi: CLICK,{x},{y},{mapped_button}")
+            # CORRIGÉ: La logique de clic est simplifiée pour envoyer un relâchement simple,
+            # sauf pour le double-clic qui reste un cas spécial.
+            if mapped_button == 'left' and touch.is_double_tap:
+                self.send_command(f"DBLCLICK,{x},{y},{mapped_button}")
+                print(f"[CLIENT DEBUG] Envoi: DBLCLICK,{x},{y},{mapped_button}")
             else:
-                mapped_button = self._get_mapped_button_name(touch.button)
+                # Pour un clic simple (gauche/droit) ou la fin d'un glisser,
+                # on envoie seulement la commande "release".
                 self.send_command(f"MC,{mapped_button},0")
-                print(f"[CLIENT DEBUG] Envoi: MC,{mapped_button},0 (up - drag)") # <-- DEBUG
+                print(f"[CLIENT DEBUG] Envoi: MC,{mapped_button},0 (up)")
 
             return True
         return super().on_touch_up(touch)
 
     def on_touch_move(self, touch):
+        # print(f"[CLIENT DEBUG] on_touch_move - button: {touch.button}, pos: {touch.pos}") # <-- DEBUG (peut être très verbeux)
         x, y = self._get_scaled_coords(touch)
         if x != -1:
             self.send_command(f"MV,{x},{y}")

@@ -47,18 +47,15 @@ def command_processor(stop_event):
             for cmd in commands:
                 if cmd[0] == 'MV': last_move = cmd
                 else: other_commands.append(cmd)
-            
+
             if last_move:
                 mouse_ctrl.position = last_move[1]
                 # print(f"[SERVER DEBUG] Souris déplacée à {last_move[1]}") # Décommenter pour débogage
 
             for cmd_type, value in other_commands:
-                # CORRECTION: Revenir à la logique standard des boutons de souris
                 if cmd_type == 'MC':
                     btn_name, pressed = value
-                    # Si le client dit 'left', on utilise Button.left (principal)
-                    # Si le client dit 'right', on utilise Button.right (secondaire)
-                    button = Button.left if btn_name == 'left' else Button.right # <-- REVERT ICI
+                    button = Button.left if btn_name == 'left' else Button.right
                     if pressed:
                         mouse_ctrl.press(button)
                         # print(f"[SERVER DEBUG] Bouton {btn_name} pressé.") # Décommenter pour débogage
@@ -68,12 +65,14 @@ def command_processor(stop_event):
                 elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
                     x, y, btn_name = value
                     mouse_ctrl.position = (x, y)
-                    # Si le client dit 'left', on utilise Button.left (principal)
-                    # Si le client dit 'right', on utilise Button.right (secondaire)
-                    button = Button.left if btn_name == 'left' else Button.right # <-- REVERT ICI
+                    button = Button.left if btn_name == 'left' else Button.right
                     click_count = 2 if cmd_type == 'DBLCLICK' else 1
                     mouse_ctrl.click(button, click_count)
                     # print(f"[SERVER DEBUG] {cmd_type} sur ({x},{y}) avec bouton {btn_name}, count={click_count}") # Décommenter pour débogage
+                elif cmd_type == 'SCROLL': # NOUVEAU: Gérer la commande SCROLL
+                    x_offset, y_offset = value
+                    mouse_ctrl.scroll(x_offset, y_offset)
+                    print(f"[SERVER DEBUG] Molette défilée: ({x_offset}, {y_offset})") # <-- DEBUG
                 elif cmd_type == 'KP':
                     key = KEY_MAP.get(value, value)
                     keyboard_ctrl.press(key)
@@ -113,7 +112,7 @@ def handle_client(client_socket):
                 parts = command.split(',', 1)
                 if len(parts) < 2: continue
                 cmd_type, value_str = parts[0], parts[1]
-                
+
                 if cmd_type == 'MV':
                     x, y = value_str.split(',')
                     command_queue.put(('MV', (int(x), int(y))))
@@ -123,6 +122,9 @@ def handle_client(client_socket):
                 elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
                     x, y, btn = value_str.split(',')
                     command_queue.put((cmd_type, (int(x), int(y), btn)))
+                elif cmd_type == 'SCROLL': # NOUVEAU: Parser la commande SCROLL
+                    x_offset, y_offset = value_str.split(',')
+                    command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
                 elif cmd_type in ('KP', 'KR'):
                     command_queue.put((cmd_type, value_str))
         finally: stop_event.set()
