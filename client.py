@@ -2,7 +2,8 @@
 from kivy.config import Config
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.utils import get_color_from_hex
 
 import socket
 import struct
@@ -42,20 +43,29 @@ Builder.load_string('''
 
 <FileEntryWidget>:
     orientation: 'horizontal'
-    padding: dp(5)
+    padding: dp(10)
     spacing: dp(10)
     size_hint_y: None
     height: dp(40)
     canvas.before:
         Color:
-            rgba: (0.2, 0.6, 0.8, 0.5) if self.is_selected else (0.15, 0.15, 0.15, 1)
+            rgba: get_color_from_hex('#5865F2') if self.is_selected else (0,0,0,0)
+        Rectangle:
+            pos: self.pos[0], self.pos[1] + self.height - dp(2)
+            size: self.width, dp(1) if self.is_selected else 0
+        Color:
+            rgba: get_color_from_hex('#2A2D31') if self.is_selected else (0.15, 0.15, 0.15, 0.5 if self.parent and self.parent.children.index(self) % 2 == 0 else 0)
         Rectangle:
             pos: self.pos
             size: self.size
     Label:
-        text: '[D]' if root.is_dir else '[F]'
+        id: icon_label
+        text: "📁" if root.is_dir else "📄"
+        font_name: 'seguisym.ttf'
+        font_size: '18sp'
         size_hint_x: None
         width: dp(30)
+        color: get_color_from_hex('#FFFFFF')
     Label:
         text: root.name
         halign: 'left'
@@ -63,6 +73,7 @@ Builder.load_string('''
         text_size: self.width, None
         shorten: True
         shorten_from: 'right'
+        color: get_color_from_hex('#FFFFFF')
     Label:
         text: root.file_size
         size_hint_x: None
@@ -70,6 +81,8 @@ Builder.load_string('''
         halign: 'right'
         valign: 'middle'
         text_size: self.width, None
+        font_size: '12sp'
+        color: get_color_from_hex('#99AAB5')
 
 <ColorProgressBar>:
     canvas:
@@ -220,6 +233,45 @@ Builder.load_string('''
             text_size: self.width, None
             halign: 'center'
             color: get_color_from_hex('#FFFFFF')
+
+<RemoteScreen>:
+    canvas.before:
+        Color:
+            rgba: get_color_from_hex('#1A1A1A')
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<TabbedPanel>:
+    do_default_tab: False
+    tab_width: 150
+    tab_height: 40
+    background_color: get_color_from_hex('#2C2F33')
+    canvas.before:
+        Color:
+            rgba: get_color_from_hex('#1A1A1A')
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<TabbedPanelItem>:
+    background_color: get_color_from_hex('#2C2F33')
+    background_disabled_normal: ''
+    background_normal: ''
+    color: get_color_from_hex('#99AAB5')
+    font_size: '14sp'
+    
+<TabbedPanelHeader>:
+    background_color: get_color_from_hex('#2C2F33')
+
+<TabbedPanelItem.background_normal>:
+    background_color: get_color_from_hex('#2C2F33')
+
+<TabbedPanelItem.background_disabled_normal>:
+    background_color: get_color_from_hex('#2C2F33')
+
+<TabbedPanelItem.background_down>:
+    background_color: get_color_from_hex('#5865F2')
 ''')
 
 # --- CORRECTION : Remise en place des variables globales ---
@@ -341,6 +393,9 @@ class FileEntryWidget(BoxLayout):
 class ConnectScreen(Screen):
     pass
 
+class RemoteScreen(Screen):
+    pass
+
 class RemoteViewerApp(App):
     def build(self):
         self.sm = ScreenManager()
@@ -356,8 +411,8 @@ class RemoteViewerApp(App):
         self.ip_input = connect_screen.ids.ip_input
         self.port_input = connect_screen.ids.port_input
         self.status_label = connect_screen.ids.status_label
-        
-        remote_screen = Screen(name='remote')
+
+        remote_screen = RemoteScreen(name='remote')
         self.tab_panel = TabbedPanel(do_default_tab=False)
         self.tab_panel.bind(current_tab=self.on_tab_switch)
 
@@ -366,68 +421,195 @@ class RemoteViewerApp(App):
         self.desktop_tab.add_widget(self.remote_widget)
         self.tab_panel.add_widget(self.desktop_tab)
 
+        # --- Onglet Infos Système (Design Compact) ---
         self.sys_info_tab = TabbedPanelItem(text='Infos Système')
-        sys_info_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        self.sys_info_labels_grid = GridLayout(cols=2, size_hint_y=None, height=dp(120))
-        self.sys_info_labels = {
-            "node_name": Label(text="Nom: -"), "user_name": Label(text="Utilisateur: -"),
-            "os_version": Label(text="OS: -"), "architecture": Label(text="Arch: -")
-        }
-        for key in ["node_name", "user_name", "os_version", "architecture"]:
-            self.sys_info_labels_grid.add_widget(Label(text=key.replace('_', ' ').title() + ':', halign='right'))
-            self.sys_info_labels_grid.add_widget(self.sys_info_labels[key])
-        self.sys_info_bars_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
-        self.sys_info_bars_grid.bind(minimum_height=self.sys_info_bars_grid.setter('height'))
+        
+        sys_info_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        
+        self.sys_info_labels = {}
         self.sys_info_widgets = {}
-        scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=False)
-        scroll_view.add_widget(self.sys_info_bars_grid)
-        sys_info_layout.add_widget(self.sys_info_labels_grid)
-        sys_info_layout.add_widget(scroll_view)
+
+        info_card = self._create_info_card()
+        info_card.size_hint_y = None
+        info_card.height = dp(120)
+        sys_info_layout.add_widget(info_card)
+
+        resources_card, self.resources_layout = self._create_resources_card()
+        sys_info_layout.add_widget(resources_card)
+        
         self.sys_info_tab.add_widget(sys_info_layout)
         self.tab_panel.add_widget(self.sys_info_tab)
 
+        # --- Onglet Paramètres (Nouveau Design) ---
         settings_tab = TabbedPanelItem(text='Paramètres')
-        settings_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        self.quality_label = Label(text='Qualité de l\'image: 70%', size_hint_y=None, height=40)
-        quality_slider = Slider(min=10, max=95, value=70, step=5)
-        quality_slider.bind(value=lambda i, v: (self.send_quality_setting(int(v)), setattr(self.quality_label, 'text', f"Qualité de l'image: {int(v)}%")))
-        settings_layout.add_widget(self.quality_label)
-        settings_layout.add_widget(quality_slider)
-        settings_tab.add_widget(settings_layout)
+
+        root_layout = BoxLayout(padding=dp(30), orientation='vertical')
+        
+        quality_card = BoxLayout(
+            orientation='vertical',
+            size_hint_y=None,
+            height=dp(180),
+            padding=dp(20),
+            spacing=dp(10)
+        )
+
+        with quality_card.canvas.before:
+            Color(rgba=get_color_from_hex('#2C2F33'))
+            self.quality_card_rect = RoundedRectangle(
+                size=quality_card.size,
+                pos=quality_card.pos,
+                radius=[dp(15)]
+            )
+        
+        quality_card.bind(
+            pos=lambda i, v: setattr(self.quality_card_rect, 'pos', v),
+            size=lambda i, v: setattr(self.quality_card_rect, 'size', v)
+        )
+
+        title_label = Label(
+            text='Qualité de l\'image', font_size='18sp', bold=True,
+            size_hint_y=None, height=dp(30), halign='left',
+            color=get_color_from_hex('#FFFFFF')
+        )
+        title_label.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
+        quality_card.add_widget(title_label)
+
+        description_label = Label(
+            text='Ajuste la qualité pour équilibrer performance et bande passante.',
+            font_size='12sp', size_hint_y=None, height=dp(20),
+            halign='left', color=get_color_from_hex('#99AAB5')
+        )
+        description_label.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
+        quality_card.add_widget(description_label)
+
+        slider_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
+
+        quality_slider = Slider(
+            min=10, max=95, value=70, step=5, value_track=True,
+            value_track_color=get_color_from_hex('#5865F2'),
+            cursor_size=(dp(20), dp(20))
+        )
+        
+        self.quality_label = Label(text='70%', size_hint_x=None, width=dp(50), color=get_color_from_hex('#FFFFFF'))
+
+        def update_quality(instance, value):
+            v = int(value)
+            self.send_quality_setting(v)
+            self.quality_label.text = f"{v}%"
+
+        quality_slider.bind(value=update_quality)
+
+        slider_layout.add_widget(quality_slider)
+        slider_layout.add_widget(self.quality_label)
+        quality_card.add_widget(slider_layout)
+
+        root_layout.add_widget(quality_card)
+        root_layout.add_widget(BoxLayout()) 
+
+        settings_tab.add_widget(root_layout)
         self.tab_panel.add_widget(settings_tab)
 
+        # --- Onglet Transferts (Fusionné et Redesigné) ---
         self.transfer_tab = TabbedPanelItem(text='Transferts')
-        transfer_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        self.transfer_status_label = Label(text='Prêt.', size_hint_y=None, height=40)
-        self.transfer_progress_bar = ProgressBar(max=100, size_hint_y=None, height=20)
-        transfer_buttons = BoxLayout(size_hint_y=None, height=40, spacing=5)
-        send_file_button = Button(text='Envoyer un fichier...', on_press=self.choose_and_upload_file)
-        self.cancel_button = Button(text='Annuler', on_press=self.cancel_transfer, disabled=True)
-        transfer_buttons.add_widget(send_file_button)
-        transfer_buttons.add_widget(self.cancel_button)
-        transfer_layout.add_widget(self.transfer_status_label)
-        transfer_layout.add_widget(self.transfer_progress_bar)
-        transfer_layout.add_widget(transfer_buttons)
-        self.transfer_tab.add_widget(transfer_layout)
-        self.tab_panel.add_widget(self.transfer_tab)
+        
+        main_transfer_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
 
-        download_tab = TabbedPanelItem(text='Fichiers Distants')
-        download_layout = BoxLayout(orientation='vertical', padding=10, spacing=5)
-        self.remote_path_label = Label(text='/', size_hint_y=None, height=30)
-        button_layout = BoxLayout(size_hint_y=None, height=40, spacing=5)
-        up_button = Button(text='..', on_press=self.go_up_dir)
-        refresh_button = Button(text='Actualiser', on_press=lambda i: self.list_remote_dir(self.current_remote_path))
-        button_layout.add_widget(up_button)
-        button_layout.add_widget(refresh_button)
+        # Carte pour l'explorateur de fichiers
+        remote_files_card = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(5))
+        with remote_files_card.canvas.before:
+            Color(rgba=get_color_from_hex('#2C2F33'))
+            remote_files_card.rect = RoundedRectangle(size=remote_files_card.size, pos=remote_files_card.pos, radius=[dp(15)])
+        remote_files_card.bind(
+            pos=lambda i, v: setattr(remote_files_card.rect, 'pos', v),
+            size=lambda i, v: setattr(remote_files_card.rect, 'size', v)
+        )
+        
+        # Barre d'outils de navigation
+        toolbar = BoxLayout(size_hint_y=None, height=dp(40), padding=(dp(5), 0), spacing=dp(10))
+        up_button = Button(text='⬆', font_name='seguisym.ttf', font_size='20sp', on_press=self.go_up_dir, size_hint_x=None, width=dp(40))
+        self.remote_path_label = Label(text='/', halign='left', valign='middle', color=get_color_from_hex('#FFFFFF'))
+        self.remote_path_label.bind(size=self.remote_path_label.setter('text_size'))
+        refresh_button = Button(text='⟳', font_name='seguisym.ttf', font_size='20sp', on_press=lambda i: self.list_remote_dir(self.current_remote_path), size_hint_x=None, width=dp(40))
+        toolbar.add_widget(up_button)
+        toolbar.add_widget(self.remote_path_label)
+        toolbar.add_widget(refresh_button)
+        remote_files_card.add_widget(toolbar)
+
+        # En-tête de la liste de fichiers
+        header = BoxLayout(size_hint_y=None, height=dp(30), padding=(dp(10), 0))
+        header.add_widget(Label(text='', size_hint_x=None, width=dp(30)))
+        header.add_widget(Label(text='Nom', bold=True, halign='left', color=get_color_from_hex('#99AAB5')))
+        header.add_widget(Label(text='Taille', bold=True, size_hint_x=None, width=dp(80), halign='right', color=get_color_from_hex('#99AAB5')))
+        remote_files_card.add_widget(header)
+
         self.file_browser_grid = GridLayout(cols=1, size_hint_y=None)
         self.file_browser_grid.bind(minimum_height=self.file_browser_grid.setter('height'))
         scroll_view_files = ScrollView()
         scroll_view_files.add_widget(self.file_browser_grid)
-        download_layout.add_widget(button_layout)
-        download_layout.add_widget(self.remote_path_label)
-        download_layout.add_widget(scroll_view_files)
-        download_tab.add_widget(download_layout)
-        self.tab_panel.add_widget(download_tab)
+        remote_files_card.add_widget(scroll_view_files)
+
+        # Carte pour les contrôles de transfert
+        transfer_controls_card = BoxLayout(
+            orientation='vertical', size_hint_y=None, height=dp(180),
+            padding=dp(20), spacing=dp(10)
+        )
+        with transfer_controls_card.canvas.before:
+            Color(rgba=get_color_from_hex('#23272A'))
+            transfer_controls_card.rect = RoundedRectangle(size=transfer_controls_card.size, pos=transfer_controls_card.pos, radius=[dp(15)])
+        transfer_controls_card.bind(
+            pos=lambda i, v: setattr(transfer_controls_card.rect, 'pos', v),
+            size=lambda i, v: setattr(transfer_controls_card.rect, 'size', v)
+        )
+
+        transfer_controls_card.add_widget(Label(
+            text='Contrôle des Transferts', font_size='16sp', bold=True,
+            size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')
+        ))
+
+        self.transfer_status_label = Label(
+            text='Prêt.', size_hint_y=None, height=dp(25),
+            color=get_color_from_hex('#99AAB5'), font_size='12sp'
+        )
+        transfer_controls_card.add_widget(self.transfer_status_label)
+
+        self.transfer_progress_bar = ColorProgressBar(max=100, size_hint_y=None, height=dp(15))
+        transfer_controls_card.add_widget(self.transfer_progress_bar)
+
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(15), padding=(0, dp(10), 0, 0))
+
+        send_file_button = Button(
+            text='Envoyer un fichier...', on_press=self.choose_and_upload_file,
+            font_size='16sp', background_color=(0,0,0,0)
+        )
+        with send_file_button.canvas.before:
+            Color(rgba=get_color_from_hex('#5865F2'))
+            send_file_button.rect = RoundedRectangle(size=send_file_button.size, pos=send_file_button.pos, radius=[dp(8)])
+        send_file_button.bind(
+            pos=lambda i, v: setattr(send_file_button.rect, 'pos', v),
+            size=lambda i, v: setattr(send_file_button.rect, 'size', v)
+        )
+
+        self.cancel_button = Button(
+            text='Annuler', on_press=self.cancel_transfer, disabled=True,
+            font_size='16sp', background_color=(0,0,0,0), size_hint_x=0.5
+        )
+        with self.cancel_button.canvas.before:
+            Color(rgba=get_color_from_hex('#40444B'))
+            self.cancel_button.rect = RoundedRectangle(size=self.cancel_button.size, pos=self.cancel_button.pos, radius=[dp(8)])
+        self.cancel_button.bind(
+            pos=lambda i, v: setattr(self.cancel_button.rect, 'pos', v),
+            size=lambda i, v: setattr(self.cancel_button.rect, 'size', v)
+        )
+
+        buttons_layout.add_widget(send_file_button)
+        buttons_layout.add_widget(self.cancel_button)
+        transfer_controls_card.add_widget(buttons_layout)
+
+        main_transfer_layout.add_widget(remote_files_card)
+        main_transfer_layout.add_widget(transfer_controls_card)
+
+        self.transfer_tab.add_widget(main_transfer_layout)
+        self.tab_panel.add_widget(self.transfer_tab)
 
         self.chat_tab = TabbedPanelItem(text='Chat')
         chat_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(5))
@@ -461,6 +643,75 @@ class RemoteViewerApp(App):
         self.sm.add_widget(connect_screen)
         self.sm.add_widget(remote_screen)
         return self.sm
+
+    def _create_info_card(self):
+        card = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(2))
+        with card.canvas.before:
+            Color(rgba=get_color_from_hex('#2C2F33'))
+            card.rect = RoundedRectangle(size=card.size, pos=card.pos, radius=[dp(15)])
+        card.bind(pos=lambda i, v: setattr(card.rect, 'pos', v), size=lambda i, v: setattr(card.rect, 'size', v))
+
+        card.add_widget(Label(text='Informations Générales', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
+        
+        grid = GridLayout(cols=2, spacing=dp(2))
+        info_keys = {"node_name": "Nom", "user_name": "Utilisateur", "os_version": "OS", "architecture": "Arch"}
+        for key, name in info_keys.items():
+            grid.add_widget(Label(text=f"{name}:", halign='right', font_size='12sp', color=get_color_from_hex('#99AAB5')))
+            self.sys_info_labels[key] = Label(text="-", halign='left', font_size='12sp', color=get_color_from_hex('#FFFFFF'))
+            grid.add_widget(self.sys_info_labels[key])
+        card.add_widget(grid)
+        return card
+
+    def _create_resources_card(self):
+        card = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(15), spacing=dp(5))
+        card.bind(minimum_height=card.setter('height'))
+        with card.canvas.before:
+            Color(rgba=get_color_from_hex('#2C2F33'))
+            card.rect = RoundedRectangle(size=card.size, pos=card.pos, radius=[dp(15)])
+        card.bind(pos=lambda i, v: setattr(card.rect, 'pos', v), size=lambda i, v: setattr(card.rect, 'size', v))
+
+        card.add_widget(Label(text='Ressources Système', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
+        
+        resources_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10))
+        resources_layout.bind(minimum_height=resources_layout.setter('height'))
+
+        cpu_layout = self._create_resource_section('cpu', 'Utilisation CPU')
+        resources_layout.add_widget(cpu_layout)
+
+        ram_layout = self._create_resource_section('ram', 'Utilisation RAM')
+        resources_layout.add_widget(ram_layout)
+
+        self.disk_grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(10))
+        self.disk_grid.bind(minimum_height=self.disk_grid.setter('height'))
+        resources_layout.add_widget(self.disk_grid)
+
+        card.add_widget(resources_layout)
+        return card, resources_layout
+
+    def _create_resource_section(self, key, title):
+        section = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(65), spacing=dp(2))
+        
+        title_layout = BoxLayout(size_hint_y=None, height=dp(20))
+        title_label = Label(text=title, font_size='14sp', halign='left', color=get_color_from_hex('#FFFFFF'))
+        title_label.bind(text_size=lambda i, ts: setattr(i, 'width', ts[0]))
+        title_layout.add_widget(title_label)
+
+        if key == 'cpu':
+            freq_label = Label(text="Freq: -", size_hint_x=None, width=dp(150), font_size='12sp', halign='right', color=get_color_from_hex('#99AAB5'))
+            self.sys_info_widgets['cpu_freq'] = freq_label
+            title_layout.add_widget(freq_label)
+        
+        section.add_widget(title_layout)
+
+        bar = ColorProgressBar(max=100, size_hint_y=None, height=dp(10))
+        percent_label = Label(text="0%", size_hint_y=None, height=dp(20), font_size='12sp', halign='left', color=get_color_from_hex('#FFFFFF'))
+        percent_label.bind(text_size=lambda i, ts: setattr(i, 'width', ts[0]))
+        
+        self.sys_info_widgets[key] = {'bar': bar, 'percent': percent_label}
+        
+        section.add_widget(bar)
+        section.add_widget(percent_label)
+        return section
 
     def on_tab_switch(self, instance, value):
         if value == self.desktop_tab: self.remote_widget.setup_keyboard()
@@ -503,37 +754,25 @@ class RemoteViewerApp(App):
         if 'error' in data:
             self.sys_info_labels['node_name'].text = f"Erreur: {data['error']}"
             return
-        for key, label in self.sys_info_labels.items(): label.text = str(data.get(key, '-'))
+        
+        for key, label in self.sys_info_labels.items():
+            label.text = str(data.get(key, '-'))
+
         cpu_info = data.get('cpu', {})
         cpu_usage = cpu_info.get('usage', 0)
-        freq_current = cpu_info.get('freq_current', 0)
-        freq_max = cpu_info.get('freq_max', 0)
-        if 'cpu' not in self.sys_info_widgets:
-            box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(70))
-            box.add_widget(Label(text="CPU Usage"))
-            bar = ColorProgressBar(max=100)
-            percent_label = Label(text="0%")
-            freq_label = Label(text="Freq: -")
-            box.add_widget(bar); box.add_widget(percent_label); box.add_widget(freq_label)
-            self.sys_info_bars_grid.add_widget(box)
-            self.sys_info_widgets['cpu'] = {'bar': bar, 'percent': percent_label, 'freq': freq_label}
         self.sys_info_widgets['cpu']['bar'].value = cpu_usage
         self.sys_info_widgets['cpu']['percent'].text = f"{cpu_usage:.1f}%"
         if cpu_usage >= 95: self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0, 0.15, 1)
         elif cpu_usage >= 80: self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0.65, 0, 1)
         else: self.sys_info_widgets['cpu']['bar'].bar_color = (0, 0.55, 1, 1)
+        
+        freq_current = cpu_info.get('freq_current', 0)
+        freq_max = cpu_info.get('freq_max', 0)
         freq_text = "Freq: "
         if freq_current > 0: freq_text += f"{freq_current / 1000:.2f} GHz"
         if freq_max > 0: freq_text += f" (Max: {freq_max / 1000:.2f} GHz)"
-        self.sys_info_widgets['cpu']['freq'].text = freq_text
-        if 'ram' not in self.sys_info_widgets:
-            box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(50))
-            box.add_widget(Label(text="RAM Usage"))
-            bar = ColorProgressBar(max=100)
-            percent_label = Label(text="0%")
-            box.add_widget(bar); box.add_widget(percent_label)
-            self.sys_info_bars_grid.add_widget(box)
-            self.sys_info_widgets['ram'] = {'bar': bar, 'percent': percent_label}
+        self.sys_info_widgets['cpu_freq'].text = freq_text
+
         ram_info = data.get('ram', {})
         ram_percent = ram_info.get('percent', 0)
         self.sys_info_widgets['ram']['bar'].value = ram_percent
@@ -541,16 +780,13 @@ class RemoteViewerApp(App):
         if ram_percent >= 95: self.sys_info_widgets['ram']['bar'].bar_color = (1, 0, 0.15, 1)
         elif ram_percent >= 80: self.sys_info_widgets['ram']['bar'].bar_color = (1, 0.65, 0, 1)
         else: self.sys_info_widgets['ram']['bar'].bar_color = (0, 0.55, 1, 1)
+
         for disk in data.get('disks', []):
             disk_id = disk['device']
             if disk_id not in self.sys_info_widgets:
-                box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(50))
-                box.add_widget(Label(text=f"Disk: {disk.get('mountpoint', disk_id)}"))
-                bar = ColorProgressBar(max=100)
-                percent_label = Label(text="0%")
-                box.add_widget(bar); box.add_widget(percent_label)
-                self.sys_info_bars_grid.add_widget(box)
-                self.sys_info_widgets[disk_id] = {'bar': bar, 'percent': percent_label}
+                disk_section = self._create_resource_section(disk_id, f"Disque: {disk.get('mountpoint', disk_id)}")
+                self.disk_grid.add_widget(disk_section)
+
             disk_percent = disk.get('percent', 0)
             self.sys_info_widgets[disk_id]['bar'].value = disk_percent
             self.sys_info_widgets[disk_id]['percent'].text = f"{disk_percent:.1f}% ({sizeof_fmt(disk.get('used',0))} / {sizeof_fmt(disk.get('total',0))})"
@@ -613,7 +849,6 @@ class RemoteViewerApp(App):
         Tk().withdraw()
         file_path = filedialog.askopenfilename(title="Choisir un fichier à envoyer", initialdir=expanduser("~"))
         if file_path:
-            self.tab_panel.switch_to(self.transfer_tab)
             self.cancel_transfer_flag.clear()
             threading.Thread(target=self._upload_file_thread, args=(file_path,), daemon=True).start()
 
@@ -658,7 +893,6 @@ class RemoteViewerApp(App):
         Tk().withdraw()
         save_path = filedialog.asksaveasfilename(title="Enregistrer le fichier sous...", initialdir=expanduser("~"), initialfile=filename)
         if save_path:
-            self.tab_panel.switch_to(self.transfer_tab)
             self.cancel_transfer_flag.clear()
             threading.Thread(target=self._download_file_thread, args=(remote_path, save_path), daemon=True).start()
 
