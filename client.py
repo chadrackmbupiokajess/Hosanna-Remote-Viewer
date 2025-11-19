@@ -9,6 +9,7 @@ import threading
 import ssl
 import os
 import json
+import time # Importation du module time
 from tkinter import Tk, filedialog
 from kivy.app import App
 from kivy.lang import Builder
@@ -30,6 +31,8 @@ from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty
 from os.path import expanduser
+import pyperclip # Importation de pyperclip
+import pythoncom # Importation de pythoncom pour la gestion des threads COM
 
 # --- KV String for the file browser row ---
 Builder.load_string('''
@@ -202,12 +205,19 @@ class FileEntryWidget(BoxLayout):
             return True
         return super().on_touch_down(touch)
 
+# Message types for the main streaming socket
+MSG_TYPE_IMAGE = b'\x01'
+MSG_TYPE_COMMAND = b'\x02'
+
 class RemoteViewerApp(App):
     def build(self):
         self.sm = ScreenManager()
         self.sys_info_update_event = None
         self.current_remote_path = ""
         self.cancel_transfer_flag = threading.Event()
+        self.clipboard_stop_event = threading.Event() # Event pour arrêter le monitoring du presse-papiers
+        self.last_clipboard_content = "" # Pour suivre le presse-papiers local
+        self.last_clipboard_content_from_server = "" # Pour éviter les boucles de synchronisation
 
         connect_screen = Screen(name='connect')
         layout = BoxLayout(orientation='vertical', padding=30, spacing=10)
@@ -466,66 +476,6 @@ class RemoteViewerApp(App):
                 # Bleu vif bien visible
                 self.sys_info_widgets[disk_id]['bar'].bar_color = (0, 0.55, 1, 1)
 
-        # Supprimé: Mise à jour GPU
-        # gpus_info = data.get('gpus', [])
-        # if gpus_info:
-        #     for i, gpu in enumerate(gpus_info):
-        #         gpu_id = f"gpu_{i}"
-        #         if gpu_id not in self.sys_info_widgets:
-        #             box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(120))
-        #             box.add_widget(Label(text=f"GPU {i}: {gpu.get('name', 'N/A')}"))
-        #             box.add_widget(Label(text="GPU Load"))
-        #             load_bar = ColorProgressBar(max=100)
-        #             load_percent_label = Label(text="0%")
-        #             box.add_widget(load_bar)
-        #             box.add_widget(load_percent_label)
-        #             box.add_widget(Label(text="GPU Memory"))
-        #             mem_bar = ColorProgressBar(max=100)
-        #             mem_percent_label = Label(text="0%")
-        #             box.add_widget(mem_bar)
-        #             box.add_widget(mem_percent_label)
-        #             temp_label = Label(text="Temp: -")
-        #             box.add_widget(temp_label)
-        #             self.sys_info_bars_grid.add_widget(box)
-        #             self.sys_info_widgets[gpu_id] = {
-        #                 'box': box,
-        #                 'load_bar': load_bar, 'load_percent': load_percent_label,
-        #                 'mem_bar': mem_bar, 'mem_percent': mem_percent_label,
-        #                 'temp_label': temp_label
-        #             }
-        #         gpu_load = gpu.get('load', 0)
-        #         self.sys_info_widgets[gpu_id]['load_bar'].value = gpu_load
-        #         self.sys_info_widgets[gpu_id]['load_percent'].text = f"{gpu_load:.1f}%"
-        #         if gpu_load >= 95:
-        #             self.sys_info_widgets[gpu_id]['load_bar'].bar_color = (1, 0, 0.3, 1)
-        #         elif gpu_load >= 80:
-        #             self.sys_info_widgets[gpu_id]['load_bar'].bar_color = (1, 0.65, 0, 1)
-        #         else:
-        #             self.sys_info_widgets[gpu_id]['load_bar'].bar_color = (0, 0.55, 1, 1)
-        #         gpu_mem_percent = gpu.get('memory_percent', 0)
-        #         gpu_mem_used = gpu.get('memory_used', 0)
-        #         gpu_mem_total = gpu.get('memory_total', 0)
-        #         self.sys_info_widgets[gpu_id]['mem_bar'].value = gpu_mem_percent
-        #         self.sys_info_widgets[gpu_id]['mem_percent'].text = f"{gpu_mem_percent:.1f}% ({sizeof_fmt(gpu_mem_used)} / {sizeof_fmt(gpu_mem_total)})"
-        #         if gpu_mem_percent >= 95:
-        #             self.sys_info_widgets[gpu_id]['mem_bar'].bar_color = (1, 0, 0.3, 1)
-        #         elif gpu_mem_percent >= 80:
-        #             self.sys_info_widgets[gpu_id]['mem_bar'].bar_color = (1, 0.65, 0, 1)
-        #         else:
-        #             self.sys_info_widgets[gpu_id]['mem_bar'].bar_color = (0, 0.55, 1, 1)
-        #         gpu_temp = gpu.get('temperature', 'N/A')
-        #         self.sys_info_widgets[gpu_id]['temp_label'].text = f"Temp: {gpu_temp}°C"
-        # else:
-        #     if 'gpu_error_message' not in self.sys_info_widgets:
-        #         error_label = Label(text="GPU Info: Not available (GPUtil not installed or no GPU detected)", size_hint_y=None, height=dp(40))
-        #         self.sys_info_bars_grid.add_widget(error_label)
-        #         self.sys_info_widgets['gpu_error_message'] = error_label
-        #     gpus_to_remove = [k for k in self.sys_info_widgets if k.startswith('gpu_') and k != 'gpu_error_message']
-        #     for gpu_id in gpus_to_remove:
-        #         self.sys_info_bars_grid.remove_widget(self.sys_info_widgets[gpu_id]['box'])
-        #         del self.sys_info_widgets[gpu_id]
-
-
     def cancel_transfer(self, instance):
         self.cancel_transfer_flag.set()
 
@@ -715,6 +665,41 @@ class RemoteViewerApp(App):
 
     def send_quality_setting(self, quality_value): self.remote_widget.send_command(f"QUALITY,{quality_value}")
 
+    def send_clipboard_to_server(self, content):
+        if self.remote_widget.client_socket:
+            try:
+                command_str = f"CLIPBOARD_DATA,{content}"
+                command_bytes = command_str.encode('utf-8')
+                len_info = struct.pack("!H", len(command_bytes))
+                # Prefix with message type for command
+                self.remote_widget.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
+                print(f"[*] CLIENT DEBUG: Envoi du presse-papiers au serveur: '{content}'")
+            except (BrokenPipeError, ConnectionResetError):
+                print("[!] CLIENT DEBUG: Serveur déconnecté lors de l'envoi du presse-papiers.")
+            except Exception as e:
+                print(f"[!] CLIENT DEBUG: Erreur lors de l'envoi du presse-papiers au serveur: {e}")
+
+    def monitor_clipboard_changes(self):
+        # Initialize COM for this thread
+        pythoncom.CoInitialize()
+        try:
+            self.last_clipboard_content = pyperclip.paste()
+            print(f"[*] CLIENT DEBUG: Démarrage du monitoring du presse-papiers. Contenu initial: '{self.last_clipboard_content}'")
+            while not self.clipboard_stop_event.is_set():
+                current_clipboard = pyperclip.paste()
+                if current_clipboard != self.last_clipboard_content and \
+                   current_clipboard != self.last_clipboard_content_from_server:
+                    print(f"[*] CLIENT DEBUG: Changement détecté dans le presse-papiers local. Ancien: '{self.last_clipboard_content}', Nouveau: '{current_clipboard}'")
+                    self.last_clipboard_content = current_clipboard
+                    self.send_clipboard_to_server(current_clipboard)
+                    print("[*] CLIENT DEBUG: Presse-papiers client mis à jour localement et envoyé au serveur.")
+                time.sleep(0.5)
+        except Exception as e:
+            print(f"[!] CLIENT DEBUG: Erreur dans monitor_clipboard_changes: {e}")
+        finally:
+            # Uninitialize COM for this thread
+            pythoncom.CoUninitialize()
+
     def connect_to_server(self, instance):
         host, port = self.ip_input.text, int(self.port_input.text)
         self.status_label.text = f"Connexion à {host}:{port}..."
@@ -730,25 +715,86 @@ class RemoteViewerApp(App):
             self.remote_widget.client_socket = client_socket
             self.send_quality_setting(70)
             Clock.schedule_once(self.switch_to_remote_screen)
-        except Exception as e: Clock.schedule_once(lambda dt, err=str(e): self.show_connection_error(err))
+
+            # Démarrer le monitoring du presse-papiers
+            self.clipboard_stop_event.clear()
+            threading.Thread(target=self.monitor_clipboard_changes, daemon=True).start()
+
+        except Exception as e:
+            Clock.schedule_once(lambda dt, err=str(e): self.show_connection_error(err))
         else:
             while True:
                 try:
-                    len_info = self.recv_all(self.remote_widget.client_socket, 4)
-                    if not len_info: break
-                    payload_size = struct.unpack("!I", len_info)[0]
-                    payload = self.recv_all(self.remote_widget.client_socket, payload_size)
-                    if not payload: break
-                    width, height = struct.unpack("!II", payload[:struct.calcsize("!II")])
-                    self.remote_widget.server_resolution = (width, height)
-                    Clock.schedule_once(lambda dt, data=payload[struct.calcsize("!II"):]: self.update_image(data))
-                except (ConnectionResetError, BrokenPipeError): break
+                    # Read message type (1 byte)
+                    msg_type_byte = self.recv_all(self.remote_widget.client_socket, 1)
+                    if not msg_type_byte:
+                        print("[!] CLIENT DEBUG: Déconnexion ou fin de flux (type de message vide).")
+                        break
+
+                    if msg_type_byte == MSG_TYPE_IMAGE:
+                        # Read image payload length (4 bytes)
+                        len_info = self.recv_all(self.remote_widget.client_socket, 4)
+                        if not len_info:
+                            print("[!] CLIENT DEBUG: Déconnexion ou fin de flux (longueur image vide).")
+                            break
+                        payload_size = struct.unpack("!I", len_info)[0]
+                        payload = self.recv_all(self.remote_widget.client_socket, payload_size)
+                        if not payload:
+                            print("[!] CLIENT DEBUG: Déconnexion ou fin de flux (payload image vide).")
+                            break
+
+                        width, height = struct.unpack("!II", payload[:struct.calcsize("!II")])
+                        self.remote_widget.server_resolution = (width, height)
+                        Clock.schedule_once(lambda dt, data=payload[struct.calcsize("!II"):]: self.update_image(data))
+
+                    elif msg_type_byte == MSG_TYPE_COMMAND:
+                        # Read command length (2 bytes)
+                        len_info = self.recv_all(self.remote_widget.client_socket, 2)
+                        if not len_info:
+                            print("[!] CLIENT DEBUG: Déconnexion ou fin de flux (longueur commande vide).")
+                            break
+                        cmd_len = struct.unpack("!H", len_info)[0]
+                        command_data = self.recv_all(self.remote_widget.client_socket, cmd_len)
+                        if not command_data:
+                            print("[!] CLIENT DEBUG: Déconnexion ou fin de flux (payload commande vide).")
+                            break
+                        command = command_data.decode('utf-8')
+
+                        parts = command.split(',', 1)
+                        cmd_type = parts[0]
+                        value_str = parts[1] if len(parts) > 1 else ""
+
+                        if cmd_type == 'CLIPBOARD_UPDATE':
+                            content = value_str
+                            try:
+                                pyperclip.copy(content)
+                                self.last_clipboard_content = content
+                                self.last_clipboard_content_from_server = content
+                                print(f"[*] CLIENT DEBUG: Presse-papiers client mis à jour par le serveur avec: '{content}'")
+                            except Exception as e:
+                                print(f"[!] CLIENT DEBUG: Erreur lors de la mise à jour du presse-papiers client: {e}")
+                        else:
+                            print(f"[!] CLIENT DEBUG: Commande inconnue reçue du serveur: '{command}'")
+                    else:
+                        print(f"[!] CLIENT DEBUG: Type de message inconnu reçu: {msg_type_byte}")
+                        break # Or handle error appropriately
+
+                except (ConnectionResetError, BrokenPipeError):
+                    print("[!] CLIENT DEBUG: Connexion perdue avec le serveur.")
+                    break
+                except Exception as e:
+                    print(f"[!] CLIENT DEBUG: Erreur inattendue dans receive_frames: {e}")
+                    break # Break on other exceptions too
+
             if self.remote_widget.client_socket:
                 self.remote_widget.client_socket.close(); self.remote_widget.client_socket = None
             Clock.schedule_once(self.switch_to_connect_screen)
 
     def switch_to_remote_screen(self, dt): self.sm.current = 'remote'; self.remote_widget.setup_keyboard()
-    def switch_to_connect_screen(self, dt): self.remote_widget.release_keyboard(); self.status_label.text = "Déconnecté."; self.sm.current = 'connect'
+    def switch_to_connect_screen(self, dt):
+        self.remote_widget.release_keyboard()
+        self.clipboard_stop_event.set() # Arrêter le monitoring du presse-papiers
+        self.status_label.text = "Déconnecté."; self.sm.current = 'connect'
     def show_connection_error(self, error_msg): self.status_label.text = f"Échec: {error_msg}"
 
     def recv_all(self, sock, n):

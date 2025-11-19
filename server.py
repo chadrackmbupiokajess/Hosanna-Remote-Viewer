@@ -15,8 +15,7 @@ from PIL import Image
 import mss
 from pynput.mouse import Button, Controller as MouseController
 from pynput.keyboard import Key, Controller as KeyboardController
-# from GPU import get_gpu_info # Supprimé
-# import pythoncom # Supprimé
+import pyperclip # Importation de pyperclip
 
 # --- Dictionnaire de touches (inchangé) ---
 KEY_MAP = {
@@ -96,22 +95,79 @@ def recv_all(sock, n):
             return None
     return data
 
+# Message types for the main streaming socket
+MSG_TYPE_IMAGE = b'\x01'
+MSG_TYPE_COMMAND = b'\x02'
+
+def send_clipboard_to_client(client_socket, content):
+    try:
+        command_str = f"CLIPBOARD_UPDATE,{content}"
+        command_bytes = command_str.encode('utf-8')
+        len_info = struct.pack("!H", len(command_bytes)) # 2 bytes for command length
+        # Prefix with message type for command
+        client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
+        print(f"[*] SERVER DEBUG: Envoi du presse-papiers au client: '{content}'")
+    except (BrokenPipeError, ConnectionResetError):
+        print("[!] SERVER DEBUG: Client déconnecté lors de l'envoi du presse-papiers.")
+    except Exception as e:
+        print(f"[!] SERVER DEBUG: Erreur lors de l'envoi du presse-papiers au client: {e}")
+
+def monitor_and_sync_clipboard(client_socket, stop_event, session_data):
+    try:
+        current_server_clipboard = pyperclip.paste()
+        session_data['last_server_clipboard'] = current_server_clipboard
+        session_data['last_client_clipboard_received'] = current_server_clipboard # Sync initial state
+
+        print(f"[*] SERVER DEBUG: Démarrage du monitoring du presse-papiers. Contenu initial serveur: '{current_server_clipboard}'")
+
+        if current_server_clipboard:
+            send_clipboard_to_client(client_socket, current_server_clipboard)
+            session_data['last_clipboard_sent_to_client'] = current_server_clipboard
+            print(f"[*] SERVER DEBUG: Presse-papiers initial du serveur envoyé au client: '{current_server_clipboard}'")
+
+        while not stop_event.is_set():
+            current_clipboard = pyperclip.paste()
+            if current_clipboard != session_data['last_server_clipboard'] and \
+               current_clipboard != session_data['last_client_clipboard_received']:
+                print(f"[*] SERVER DEBUG: Changement détecté dans le presse-papiers local du serveur. Ancien: '{session_data['last_server_clipboard']}', Nouveau: '{current_clipboard}'")
+                send_clipboard_to_client(client_socket, current_clipboard)
+                session_data['last_server_clipboard'] = current_clipboard
+                session_data['last_clipboard_sent_to_client'] = current_clipboard
+                print(f"[*] SERVER DEBUG: Presse-papiers serveur mis à jour localement et envoyé au client.")
+            time.sleep(0.5)
+    except Exception as e:
+        print(f"[!] SERVER DEBUG: Erreur dans monitor_and_sync_clipboard: {e}")
+
 def handle_client(client_socket):
     stop_event = threading.Event()
     session_settings = {'jpeg_quality': 70}
+    session_data = {
+        'jpeg_quality': 70,
+        'last_server_clipboard': "",
+        'last_client_clipboard_received': "",
+        'last_clipboard_sent_to_client': ""
+    }
 
     processor_thread = threading.Thread(target=command_processor, args=(stop_event,))
     processor_thread.daemon = True
     processor_thread.start()
 
+    clipboard_monitor = threading.Thread(target=monitor_and_sync_clipboard, args=(client_socket, stop_event, session_data))
+    clipboard_monitor.daemon = True
+    clipboard_monitor.start()
+
     def receive_commands():
         try:
             while not stop_event.is_set():
                 len_info = recv_all(client_socket, 2)
-                if not len_info: break
+                if not len_info:
+                    print("[!] SERVER DEBUG: Déconnexion ou fin de flux (longueur commande vide).")
+                    break
                 cmd_len = struct.unpack("!H", len_info)[0]
                 command_data = recv_all(client_socket, cmd_len)
-                if not command_data: break
+                if not command_data:
+                    print("[!] SERVER DEBUG: Déconnexion ou fin de flux (payload commande vide).")
+                    break
                 command = command_data.decode('utf-8')
 
                 parts = command.split(',', 1)
@@ -135,6 +191,17 @@ def handle_client(client_socket):
                     command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
                 elif cmd_type in ('KP', 'KR'):
                     command_queue.put((cmd_type, value_str))
+                elif cmd_type == 'CLIPBOARD_DATA': # Nouvelle commande pour le presse-papiers du client
+                    content = value_str
+                    try:
+                        pyperclip.copy(content)
+                        session_data['last_server_clipboard'] = content # Mettre à jour l'état du serveur
+                        session_data['last_client_clipboard_received'] = content # Marquer comme reçu du client
+                        print(f"[*] SERVER DEBUG: Presse-papiers serveur mis à jour par le client avec: '{content}'")
+                    except Exception as e:
+                        print(f"[!] SERVER DEBUG: Erreur lors de la mise à jour du presse-papiers serveur: {e}")
+                else:
+                    print(f"[!] SERVER DEBUG: Commande inconnue reçue du client: '{command}'")
         finally:
             stop_event.set()
 
@@ -151,8 +218,9 @@ def handle_client(client_socket):
                     img.save(buffer, format='JPEG', quality=quality)
                     jpeg_bytes = buffer.getvalue()
                     payload = header + jpeg_bytes
-                    len_info = struct.pack("!I", len(payload))
-                    client_socket.sendall(len_info + payload)
+                    len_info = struct.pack("!I", len(payload)) # 4 bytes for payload length
+                    # Prefix with message type for image
+                    client_socket.sendall(MSG_TYPE_IMAGE + len_info + payload)
                     time.sleep(0.03)
         except (BrokenPipeError, ConnectionResetError):
             print("[-] Le client de bureau a fermé la connexion.")
@@ -210,15 +278,11 @@ def get_system_info():
                 continue
         sys_info["disks"] = partitions_info
 
-        # sys_info["gpus"] = [] # Supprimé la logique GPU
-
-        print(f"[*] Infos système collectées: {sys_info}") # Ligne de débogage ajoutée
+        print(f"[*] Infos système collectées: {sys_info}")
         return sys_info
     except Exception as e:
         print(f"[*] Erreur dans get_system_info: {e}", file=sys.stderr)
         return {"error": str(e)}
-    # finally: # Supprimé
-        # pythoncom.CoUninitialize() # Supprimé
 
 def get_downloads_folder():
     try:

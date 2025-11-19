@@ -1,0 +1,49 @@
+Dans ce projet, nous utilisons plusieurs protocoles et mécanismes de communication, chacun ayant un rôle spécifique :
+
+1.  **TCP/IP (Transmission Control Protocol/Internet Protocol)** :
+    *   C'est le protocole de transport fondamental. Toutes les communications entre le client et le serveur sont établies sur des sockets TCP, garantissant une livraison fiable et ordonnée des données.
+    *   Il y a deux sockets TCP distincts :
+        *   Un pour le streaming du bureau et les commandes en temps réel (port principal, ex: 9999).
+        *   Un pour le transfert de fichiers et les requêtes d'informations système (port secondaire, ex: 9998).
+
+2.  **SSL/TLS (Secure Sockets Layer/Transport Layer Security)** :
+    *   Au-dessus de TCP, SSL/TLS est utilisé pour sécuriser les deux canaux de communication. Cela assure :
+        *   **Confidentialité** : Les données échangées sont chiffrées, empêchant l'écoute clandestine.
+        *   **Intégrité** : Les données ne peuvent pas être altérées sans être détectées.
+        *   **Authentification** : Le serveur présente un certificat (cert.pem) pour prouver son identité.
+
+3.  **Protocole Applicatif Personnalisé (pour le Streaming et les Commandes en temps réel)** :
+    *   Ce protocole est utilisé sur le socket principal pour le flux vidéo du bureau, les commandes souris/clavier, et la synchronisation du presse-papiers.
+    *   Chaque message est structuré avec un préfixe pour permettre au récepteur de l'interpréter correctement :
+        *   **1 octet** : **Type de message** (MSG_TYPE_IMAGE ou MSG_TYPE_COMMAND).
+        *   **En-tête de longueur** :
+            *   Pour les **images** (MSG_TYPE_IMAGE) : **4 octets** (!I en Python struct) indiquant la taille totale du payload de l'image (y compris la résolution).
+            *   Pour les **commandes** (MSG_TYPE_COMMAND) : **2 octets** (!H en Python struct) indiquant la taille de la chaîne de commande.
+        *   **Payload** : Les données brutes de l'image (JPEG) ou la chaîne de commande encodée en UTF-8.
+    *   **Commandes spécifiques (chaînes de caractères)** :
+        *   QUALITY,<valeur> : Définit la qualité JPEG de l'image.
+        *   MV,<x>,<y> : Mouvement de la souris.
+        *   MC,<bouton>,<état> : Clic de souris (bouton pressé/relâché).
+        *   CLICK,<x>,<y>,<bouton> / DBLCLICK,<x>,<y>,<bouton> : Clic simple ou double.
+        *   SCROLL,<x_offset>,<y_offset> : Défilement de la souris.
+        *   KP,<touche> / KR,<touche> : Touche pressée/relâchée.
+        *   CLIPBOARD_DATA,<contenu> : Contenu du presse-papiers envoyé du client au serveur.
+        *   CLIPBOARD_UPDATE,<contenu> : Contenu du presse-papiers envoyé du serveur au client.
+
+4.  **Protocole Applicatif Personnalisé (pour le Transfert de Fichiers et Infos Système)** :
+    *   Ce protocole est utilisé sur le socket secondaire. Il est également basé sur des messages.
+    *   **Requêtes du client** :
+        *   **2 octets** (!H) : Longueur de la chaîne d'en-tête.
+        *   **Chaîne d'en-tête** : Une commande et ses arguments (ex: UPLOAD,<nom_fichier>,<taille_fichier>, LIST_DIR,<chemin>, DOWNLOAD,<chemin>, GET_SYS_INFO).
+    *   **Réponses du serveur** :
+        *   Pour GET_SYS_INFO et LIST_DIR : **4 octets** (!I) pour la longueur du JSON, suivi du JSON encodé.
+        *   Pour DOWNLOAD : **8 octets** (!Q) pour la taille du fichier, suivi des données brutes du fichier.
+        *   Pour UPLOAD (succès) : La chaîne "OK".
+
+5.  **WMI (Windows Management Instrumentation)** :
+    *   C'est une technologie Microsoft (non un protocole réseau dans ce contexte) utilisée par le serveur (si sous Windows) pour collecter des informations système détaillées (CPU, RAM, Disques, et potentiellement GPU) via des requêtes internes au système d'exploitation.
+
+6.  **pyperclip** :
+    *   C'est une bibliothèque Python qui sert d'interface aux API natives du presse-papiers du système d'exploitation (par exemple, les API Win32 sur Windows, Xclip/Xsel sur Linux, etc.). Elle n'est pas un protocole réseau en soi, mais elle est essentielle pour l'implémentation du partage du presse-papiers en interagissant avec les mécanismes locaux du système d'exploitation.
+
+En résumé, le projet utilise une combinaison de protocoles standards (TCP, SSL/TLS) et de protocoles applicatifs personnalisés pour gérer les différents types de données et de commandes échangées entre le client et le serveur.
