@@ -270,10 +270,10 @@ class RemoteViewerApp(App):
 
         settings_tab = TabbedPanelItem(text='Paramètres')
         settings_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        quality_label = Label(text='Qualité de l\'image: 70%', size_hint_y=None, height=40)
+        self.quality_label = Label(text='Qualité de l\'image: 70%', size_hint_y=None, height=40) # Rendu self.quality_label
         quality_slider = Slider(min=10, max=95, value=70, step=5)
-        quality_slider.bind(value=lambda i, v: self.send_quality_setting(int(v)))
-        settings_layout.add_widget(quality_label)
+        quality_slider.bind(value=lambda i, v: (self.send_quality_setting(int(v)), setattr(self.quality_label, 'text', f"Qualité de l'image: {int(v)}%"))) # Mise à jour du label
+        settings_layout.add_widget(self.quality_label) # Utilisation de self.quality_label
         settings_layout.add_widget(quality_slider)
         settings_tab.add_widget(settings_layout)
         self.tab_panel.add_widget(settings_tab)
