@@ -425,7 +425,7 @@ class RemoteViewerApp(App):
         # --- Onglet Infos Système (Design Compact) ---
         self.sys_info_tab = TabbedPanelItem(text='Infos Système')
 
-        sys_info_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        sys_info_layout = BoxLayout(orientation='vertical', padding=[dp(20), dp(15), dp(20), dp(120)], spacing=dp(15))
 
         self.sys_info_labels = {}
         self.sys_info_widgets = {}
