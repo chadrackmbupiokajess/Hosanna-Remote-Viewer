@@ -153,7 +153,8 @@ class RemoteDesktopWidget(Image):
         x, y = self._get_scaled_coords(touch)
         if x != -1:
             if touch.is_mouse_scrolling:
-                self.send_command(f"SCROLL,0,{int(touch.scroll_y)}")
+                if hasattr(touch, 'scroll_y'):
+                    self.send_command(f"SCROLL,0,{int(touch.scroll_y)}")
                 return True
             self.send_command(f"MV,{x},{y}")
             touch.ud['initial_pos'] = touch.pos
@@ -185,7 +186,8 @@ class RemoteDesktopWidget(Image):
             try:
                 command_bytes = command_str.encode('utf-8')
                 len_info = struct.pack("!H", len(command_bytes))
-                self.client_socket.sendall(len_info + command_bytes)
+                # MODIFICATION ICI : Ajouter le préfixe MSG_TYPE_COMMAND
+                self.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
             except (BrokenPipeError, ConnectionResetError): pass
 
 class FileEntryWidget(BoxLayout):
@@ -218,6 +220,7 @@ class RemoteViewerApp(App):
         self.clipboard_stop_event = threading.Event() # Event pour arrêter le monitoring du presse-papiers
         self.last_clipboard_content = "" # Pour suivre le presse-papiers local
         self.last_clipboard_content_from_server = "" # Pour éviter les boucles de synchronisation
+        self.chat_history_messages = [] # Nouvelle liste pour stocker les messages de chat
 
         connect_screen = Screen(name='connect')
         layout = BoxLayout(orientation='vertical', padding=30, spacing=10)
@@ -317,6 +320,52 @@ class RemoteViewerApp(App):
         download_tab.add_widget(download_layout)
         self.tab_panel.add_widget(download_tab)
 
+        # --- NOUVEAU : Onglet Chat ---
+        self.chat_tab = TabbedPanelItem(text='Chat')
+        chat_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(5))
+
+        self.chat_history_label = Label(
+            text='',
+            halign='left',
+            valign='top',
+            size_hint_y=None,
+            markup=True # Permet d'utiliser des balises comme [b]gras[/b] ou [color=FF0000]couleur[/color]
+        )
+        # Lie la taille du texte à la largeur du label pour un retour à la ligne automatique
+        self.chat_history_label.bind(width=lambda instance, value: setattr(instance, 'text_size', (value, None)))
+        self.chat_history_label.bind(texture_size=self.chat_history_label.setter('size'))
+
+        chat_scroll_view = ScrollView(size_hint=(1, 1))
+        chat_scroll_view.add_widget(self.chat_history_label)
+
+        chat_input_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
+        self.chat_input = TextInput(multiline=False, hint_text='Tapez votre message ici...')
+        send_button = Button(text='Envoyer', size_hint_x=None, width=dp(80), on_press=self.send_chat_message)
+
+        chat_input_layout.add_widget(self.chat_input)
+        chat_input_layout.add_widget(send_button)
+
+        chat_layout.add_widget(chat_scroll_view)
+        chat_layout.add_widget(chat_input_layout)
+        self.chat_tab.add_widget(chat_layout)
+        self.tab_panel.add_widget(self.chat_tab)
+        # --- FIN NOUVEL ONGLET CHAT ---
+
+        # --- NOUVEAU : Onglet À propos ---
+        about_tab = TabbedPanelItem(text='À propos')
+        about_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(10))
+
+        about_layout.add_widget(Label(text='[b]Hosanna Remote Viewer[/b]', markup=True, font_size='20sp', size_hint_y=None, height=dp(40)))
+        about_layout.add_widget(Label(text='Version: 1.0.0', size_hint_y=None, height=dp(30)))
+        about_layout.add_widget(Label(text='Développé par: Chadrak', size_hint_y=None, height=dp(30)))
+        about_layout.add_widget(Label(text='Année: 2024', size_hint_y=None, height=dp(30)))
+        about_layout.add_widget(Label(text='[b]Description:[/b]', markup=True, size_hint_y=None, height=dp(30)))
+        about_layout.add_widget(Label(text='Application de visualisation et de contrôle à distance sécurisée.', halign='center', valign='middle'))
+
+        about_tab.add_widget(about_layout)
+        self.tab_panel.add_widget(about_tab)
+        # --- FIN NOUVEL ONGLET À PROPOS ---
+
         self.tab_panel.default_tab = self.desktop_tab
         remote_screen.add_widget(self.tab_panel)
 
@@ -326,6 +375,15 @@ class RemoteViewerApp(App):
         return self.sm
 
     def on_tab_switch(self, instance, value):
+        # --- Gestion du clavier ---
+        if value == self.desktop_tab:
+            self.remote_widget.setup_keyboard()
+            print("[*] CLIENT DEBUG: Keyboard focus given to RemoteDesktopWidget.")
+        else:
+            self.remote_widget.release_keyboard()
+            print("[*] CLIENT DEBUG: Keyboard focus released from RemoteDesktopWidget.")
+
+        # --- Gestion des infos système ---
         if value == self.sys_info_tab:
             self.start_sys_info_updates()
         else:
@@ -355,6 +413,7 @@ class RemoteViewerApp(App):
                 secure_sock = context.wrap_socket(sock, server_hostname=host)
                 secure_sock.connect((host, file_port))
                 secure_sock.sendall(len_info + header_bytes)
+
                 len_info = self.recv_all(secure_sock, 4)
                 if not len_info: return
                 payload_size = struct.unpack("!I", len_info)[0]
@@ -518,7 +577,7 @@ class RemoteViewerApp(App):
                 payload = self.recv_all(secure_sock, payload_size)
                 data = json.loads(payload.decode('utf-8'))
                 Clock.schedule_once(lambda dt: self.update_file_browser(data))
-        except Exception as e: 
+        except Exception as e:
             print(f"Erreur listage: {e}")
             Clock.schedule_once(lambda dt: setattr(self.transfer_status_label, 'text', f"Erreur: {e}"))
 
@@ -527,10 +586,10 @@ class RemoteViewerApp(App):
             self.transfer_status_label.text = f"Erreur distante: {data['error']}"
         else:
             self.transfer_status_label.text = "Prêt."
-        
+
         self.current_remote_path = data.get('path', self.current_remote_path)
         self.remote_path_label.text = f"/{self.current_remote_path}"
-        
+
         self.file_browser_grid.clear_widgets()
         for entry in data.get('entries', []):
             widget = FileEntryWidget(
@@ -541,7 +600,7 @@ class RemoteViewerApp(App):
             self.file_browser_grid.add_widget(widget)
 
     def choose_and_upload_file(self, instance):
-        Tk().withdraw() 
+        Tk().withdraw()
         file_path = filedialog.askopenfilename(title="Choisir un fichier à envoyer", initialdir=expanduser("~"))
         if file_path:
             self.tab_panel.switch_to(self.transfer_tab)
@@ -551,7 +610,7 @@ class RemoteViewerApp(App):
     def _upload_file_thread(self, file_path):
         def update_status(text): Clock.schedule_once(lambda dt: setattr(self.transfer_status_label, 'text', text))
         def update_progress(value): Clock.schedule_once(lambda dt: setattr(self.transfer_progress_bar, 'value', value))
-        
+
         Clock.schedule_once(lambda dt: setattr(self.cancel_button, 'disabled', False))
         try:
             filename, filesize = os.path.basename(file_path), os.path.getsize(file_path)
@@ -611,7 +670,7 @@ class RemoteViewerApp(App):
                 secure_sock = context.wrap_socket(sock, server_hostname=host)
                 secure_sock.connect((host, file_port))
                 secure_sock.sendall(len_info + header_bytes)
-                
+
                 response_header = self.recv_all(secure_sock, 8)
                 if not response_header:
                     update_status("Erreur: Pas de réponse du serveur."); update_progress(0)
@@ -627,7 +686,7 @@ class RemoteViewerApp(App):
                 if filesize == 0:
                     update_status("Erreur: Fichier non trouvé ou vide."); update_progress(0)
                     return
-                    
+
                 bytes_received = 0
                 with open(save_path, 'wb') as f:
                     while bytes_received < filesize:
@@ -635,7 +694,7 @@ class RemoteViewerApp(App):
                             update_status("Téléchargement annulé.")
                             update_progress(0)
                             return
-                        
+
                         chunk_size = min(65536, filesize - bytes_received)
                         chunk = secure_sock.recv(chunk_size)
                         if not chunk:
@@ -678,6 +737,47 @@ class RemoteViewerApp(App):
                 print("[!] CLIENT DEBUG: Serveur déconnecté lors de l'envoi du presse-papiers.")
             except Exception as e:
                 print(f"[!] CLIENT DEBUG: Erreur lors de l'envoi du presse-papiers au serveur: {e}")
+
+    # NOUVEAU : Méthode pour envoyer un message de chat au serveur
+    def send_chat_message(self, instance):
+        message = self.chat_input.text.strip()
+        if message:
+            if self.remote_widget.client_socket:
+                try:
+                    command_str = f"CHAT_MESSAGE,{message}"
+                    command_bytes = command_str.encode('utf-8')
+                    len_info = struct.pack("!H", len(command_bytes))
+                    # Utilise MSG_TYPE_COMMAND pour les messages de chat
+                    self.remote_widget.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
+                    print(f"[*] CLIENT DEBUG: Message chat envoyé au serveur: '{message}'")
+                    # Ajoute le message à l'historique local
+                    self.add_message_to_chat_history(f"[b][color=00BFFF]Moi:[/color][/b] {message}")
+                    self.chat_input.text = '' # Efface le champ de saisie
+                except (BrokenPipeError, ConnectionResetError):
+                    print("[!] CLIENT DEBUG: Serveur déconnecté lors de l'envoi du message chat.")
+                    self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Serveur déconnecté.")
+                except Exception as e:
+                    print(f"[!] CLIENT DEBUG: Erreur lors de l'envoi du message chat: {e}")
+                    self.add_message_to_chat_history(f"[b][color=FF0000]Erreur:[/color][/b] {e}")
+            else:
+                self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Non connecté au serveur.")
+
+    # NOUVEAU : Méthode pour ajouter un message à l'historique du chat et mettre à jour l'UI
+    def add_message_to_chat_history(self, message):
+        self.chat_history_messages.append(message)
+        # Limite le nombre de messages pour éviter une consommation excessive de mémoire
+        if len(self.chat_history_messages) > 100: # Exemple de limite
+            self.chat_history_messages = self.chat_history_messages[-100:]
+
+        # Met à jour l'UI sur le thread principal
+        Clock.schedule_once(lambda dt: self._update_chat_history_ui_text())
+
+    # NOUVEAU : Méthode interne pour mettre à jour le texte du label de l'historique du chat
+    def _update_chat_history_ui_text(self):
+        self.chat_history_label.text = '\n'.join(self.chat_history_messages)
+        # Fait défiler vers le bas
+        if self.chat_history_label.parent and isinstance(self.chat_history_label.parent, ScrollView):
+            self.chat_history_label.parent.scroll_y = 0 # Fait défiler vers le bas
 
     def monitor_clipboard_changes(self):
         # Initialize COM for this thread
@@ -773,6 +873,10 @@ class RemoteViewerApp(App):
                                 print(f"[*] CLIENT DEBUG: Presse-papiers client mis à jour par le serveur avec: '{content}'")
                             except Exception as e:
                                 print(f"[!] CLIENT DEBUG: Erreur lors de la mise à jour du presse-papiers client: {e}")
+                        elif cmd_type == 'CHAT_MESSAGE_FROM_SERVER': # NOUVEAU : Gérer les messages de chat du serveur
+                            message = value_str
+                            print(f"[*] CLIENT DEBUG: Message chat reçu du serveur: '{message}'")
+                            self.add_message_to_chat_history(f"[b][color=00FF00]Serveur:[/color][/b] {message}")
                         else:
                             print(f"[!] CLIENT DEBUG: Commande inconnue reçue du serveur: '{command}'")
                     else:
