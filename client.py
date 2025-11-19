@@ -1,6 +1,8 @@
 # Configurer Kivy pour gérer le clic droit
 from kivy.config import Config
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
+from kivy.core.window import Window
+from kivy.graphics import Color, Rectangle
 
 import socket
 import struct
@@ -9,7 +11,7 @@ import threading
 import ssl
 import os
 import json
-import time # Importation du module time
+import time
 from tkinter import Tk, filedialog
 from kivy.app import App
 from kivy.lang import Builder
@@ -18,7 +20,6 @@ from kivy.uix.image import Image
 from kivy.graphics.texture import Texture
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
-from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -31,11 +32,14 @@ from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty
 from os.path import expanduser
-import pyperclip # Importation de pyperclip
-import pythoncom # Importation de pythoncom pour la gestion des threads COM
+import pyperclip
+import pythoncom
 
-# --- KV String for the file browser row ---
+# --- NOUVEAU : Design amélioré avec KV String ---
 Builder.load_string('''
+#:import get_color_from_hex kivy.utils.get_color_from_hex
+#:import RoundedRectangle kivy.graphics.RoundedRectangle
+
 <FileEntryWidget>:
     orientation: 'horizontal'
     padding: dp(5)
@@ -83,12 +87,148 @@ Builder.load_string('''
             pos: self.x, self.center_y - 12
             size: self.width * (self.value / float(self.max)) if self.max else 0, 24
             source: 'atlas://data/images/defaulttheme/progressbar'
+
+<ConnectScreen>:
+    canvas.before:
+        Color:
+            rgba: get_color_from_hex('#1A1A1A') # Dark background
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint: None, None
+        size: dp(400), dp(550)
+        pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+        padding: dp(30)
+        spacing: dp(25)
+        canvas.before:
+            Color:
+                rgba: get_color_from_hex('#2C2F33') # Card background
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(15),]
+
+        Image:
+            source: 'logo.ico'
+            size_hint_y: None
+            height: dp(100)
+            allow_stretch: True
+
+        Label:
+            text: 'Hosanna Remote'
+            font_size: '32sp'
+            bold: True
+            size_hint_y: None
+            height: self.texture_size[1]
+            color: get_color_from_hex('#FFFFFF')
+
+        Label:
+            text: 'Connexion sécurisée'
+            font_size: '16sp'
+            size_hint_y: None
+            height: self.texture_size[1]
+            color: get_color_from_hex('#99AAB5')
+            padding_y: dp(10)
+
+        GridLayout:
+            cols: 1
+            spacing: dp(20)
+            size_hint_y: None
+            height: self.minimum_height
+
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                canvas.before:
+                    Color:
+                        rgba: get_color_from_hex('#23272A')
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8),]
+                TextInput:
+                    id: ip_input
+                    hint_text: 'Adresse IP du serveur'
+                    multiline: False
+                    background_color: 0,0,0,0
+                    foreground_color: get_color_from_hex('#FFFFFF')
+                    hint_text_color: get_color_from_hex('#99AAB5')
+                    font_size: '15sp'
+                    padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
+
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                canvas.before:
+                    Color:
+                        rgba: get_color_from_hex('#23272A')
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8),]
+                TextInput:
+                    id: port_input
+                    hint_text: 'Port (ex: 1981)'
+                    multiline: False
+                    background_color: 0,0,0,0
+                    foreground_color: get_color_from_hex('#FFFFFF')
+                    hint_text_color: get_color_from_hex('#99AAB5')
+                    font_size: '15sp'
+                    padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(50)
+            spacing: dp(15)
+
+            Button:
+                id: discover_button
+                text: 'Rechercher'
+                font_size: '16sp'
+                background_color: 0,0,0,0
+                canvas.before:
+                    Color:
+                        rgba: get_color_from_hex('#40444B')
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8),]
+                on_press: app.discover_server(self)
+
+            Button:
+                id: connect_button
+                text: 'Se connecter'
+                font_size: '16sp'
+                background_color: 0,0,0,0
+                canvas.before:
+                    Color:
+                        rgba: get_color_from_hex('#5865F2') # Accent color
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(8),]
+                on_press: app.connect_to_server(self)
+
+        Label:
+            id: status_label
+            text: ''
+            size_hint_y: None
+            height: self.texture_size[1]
+            text_size: self.width, None
+            halign: 'center'
+            color: get_color_from_hex('#FFFFFF')
 ''')
 
-class ColorProgressBar(ProgressBar):
-    bar_color = ColorProperty([0.2, 0.6, 0.8, 1]) # Default blue
+# --- CORRECTION : Remise en place des variables globales ---
+MSG_TYPE_IMAGE = b'\x01'
+MSG_TYPE_COMMAND = b'\x02'
 
-# --- Fonctions utilitaires pour la taille des fichiers ---
+class ColorProgressBar(ProgressBar):
+    bar_color = ColorProperty([0.2, 0.6, 0.8, 1])
+
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "K", "M", "G", "T", "P", "E", "Z"]:
         if abs(num) < 1024.0:
@@ -129,32 +269,25 @@ class RemoteDesktopWidget(Image):
 
     def _get_scaled_coords(self, touch):
         app = App.get_running_app()
-        if not hasattr(app, 'tab_panel') or not hasattr(app, 'desktop_tab'):
-            return -1, -1
-        if app.tab_panel.current_tab != app.desktop_tab:
-            return -1, -1
-
+        if not hasattr(app, 'tab_panel') or not hasattr(app, 'desktop_tab'): return -1, -1
+        if app.tab_panel.current_tab != app.desktop_tab: return -1, -1
         if not self.texture or self.norm_image_size[0] == 0: return -1, -1
         img_x = self.center_x - self.norm_image_size[0] / 2
         img_y = self.center_y - self.norm_image_size[1] / 2
-        if not (img_x <= touch.x < img_x + self.norm_image_size[0] and \
-                img_y <= touch.y < img_y + self.norm_image_size[1]):
-            return -1, -1
+        if not (img_x <= touch.x < img_x + self.norm_image_size[0] and img_y <= touch.y < img_y + self.norm_image_size[1]): return -1, -1
         relative_x = (touch.x - img_x) / self.norm_image_size[0]
         relative_y = (touch.y - img_y) / self.norm_image_size[1]
         server_x = int(relative_x * self.server_resolution[0])
         server_y = int((1 - relative_y) * self.server_resolution[1])
         return server_x, server_y
 
-    def _get_mapped_button_name(self, kivy_button_name):
-        return kivy_button_name
+    def _get_mapped_button_name(self, kivy_button_name): return kivy_button_name
 
     def on_touch_down(self, touch):
         x, y = self._get_scaled_coords(touch)
         if x != -1:
             if touch.is_mouse_scrolling:
-                if hasattr(touch, 'scroll_y'):
-                    self.send_command(f"SCROLL,0,{int(touch.scroll_y)}")
+                if hasattr(touch, 'scroll_y'): self.send_command(f"SCROLL,0,{int(touch.scroll_y)}")
                 return True
             self.send_command(f"MV,{x},{y}")
             touch.ud['initial_pos'] = touch.pos
@@ -200,14 +333,13 @@ class FileEntryWidget(BoxLayout):
             if touch.is_double_tap:
                 App.get_running_app().on_file_selection(self.name, self.is_dir)
             else:
-                for widget in self.parent.children:
-                    widget.is_selected = False
+                for widget in self.parent.children: widget.is_selected = False
                 self.is_selected = True
             return True
         return super().on_touch_down(touch)
 
-MSG_TYPE_IMAGE = b'\x01'
-MSG_TYPE_COMMAND = b'\x02'
+class ConnectScreen(Screen):
+    pass
 
 class RemoteViewerApp(App):
     def build(self):
@@ -220,29 +352,11 @@ class RemoteViewerApp(App):
         self.last_clipboard_content_from_server = ""
         self.chat_history_messages = []
 
-        connect_screen = Screen(name='connect')
-        layout = BoxLayout(orientation='vertical', padding=30, spacing=10)
-        grid = GridLayout(cols=2, spacing=10, size_hint_y=None, height=100)
-        grid.add_widget(Label(text='Adresse IP:'))
-        self.ip_input = TextInput(text='', hint_text='IP (ex: 192.168.20.100)', multiline=False)
-        grid.add_widget(self.ip_input)
-        grid.add_widget(Label(text='Port:'))
-        self.port_input = TextInput(text='', hint_text='Port (ex: 1981)', multiline=False)
-        grid.add_widget(self.port_input)
+        connect_screen = ConnectScreen(name='connect')
+        self.ip_input = connect_screen.ids.ip_input
+        self.port_input = connect_screen.ids.port_input
+        self.status_label = connect_screen.ids.status_label
         
-        self.status_label = Label(text='', size_hint_y=None, height=40)
-        
-        buttons_layout = BoxLayout(spacing=10, size_hint_y=None, height=40)
-        discover_button = Button(text='Rechercher', on_press=self.discover_server)
-        connect_button = Button(text='Se connecter', on_press=self.connect_to_server)
-        buttons_layout.add_widget(discover_button)
-        buttons_layout.add_widget(connect_button)
-        
-        layout.add_widget(grid)
-        layout.add_widget(buttons_layout)
-        layout.add_widget(self.status_label)
-        connect_screen.add_widget(layout)
-
         remote_screen = Screen(name='remote')
         self.tab_panel = TabbedPanel(do_default_tab=False)
         self.tab_panel.bind(current_tab=self.on_tab_switch)
@@ -288,8 +402,7 @@ class RemoteViewerApp(App):
         self.transfer_progress_bar = ProgressBar(max=100, size_hint_y=None, height=20)
         transfer_buttons = BoxLayout(size_hint_y=None, height=40, spacing=5)
         send_file_button = Button(text='Envoyer un fichier...', on_press=self.choose_and_upload_file)
-        self.cancel_button = Button(text='Annuler', on_press=self.cancel_transfer)
-        self.cancel_button.disabled = True
+        self.cancel_button = Button(text='Annuler', on_press=self.cancel_transfer, disabled=True)
         transfer_buttons.add_widget(send_file_button)
         transfer_buttons.add_widget(self.cancel_button)
         transfer_layout.add_widget(self.transfer_status_label)
@@ -319,8 +432,7 @@ class RemoteViewerApp(App):
         self.chat_tab = TabbedPanelItem(text='Chat')
         chat_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(5))
         self.chat_history_label = Label(text='', halign='left', valign='top', size_hint_y=None, markup=True)
-        self.chat_history_label.bind(width=lambda instance, value: setattr(instance, 'text_size', (value, None)))
-        self.chat_history_label.bind(texture_size=self.chat_history_label.setter('size'))
+        self.chat_history_label.bind(width=lambda instance, value: setattr(instance, 'text_size', (value, None)), texture_size=self.chat_history_label.setter('size'))
         chat_scroll_view = ScrollView(size_hint=(1, 1))
         chat_scroll_view.add_widget(self.chat_history_label)
         chat_input_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
@@ -351,14 +463,10 @@ class RemoteViewerApp(App):
         return self.sm
 
     def on_tab_switch(self, instance, value):
-        if value == self.desktop_tab:
-            self.remote_widget.setup_keyboard()
-        else:
-            self.remote_widget.release_keyboard()
-        if value == self.sys_info_tab:
-            self.start_sys_info_updates()
-        else:
-            self.stop_sys_info_updates()
+        if value == self.desktop_tab: self.remote_widget.setup_keyboard()
+        else: self.remote_widget.release_keyboard()
+        if value == self.sys_info_tab: self.start_sys_info_updates()
+        else: self.stop_sys_info_updates()
 
     def start_sys_info_updates(self):
         if not self.sys_info_update_event:
@@ -370,8 +478,7 @@ class RemoteViewerApp(App):
             self.sys_info_update_event.cancel()
             self.sys_info_update_event = None
 
-    def _request_sys_info_thread(self):
-        threading.Thread(target=self._get_sys_info_from_server, daemon=True).start()
+    def _request_sys_info_thread(self): threading.Thread(target=self._get_sys_info_from_server, daemon=True).start()
 
     def _get_sys_info_from_server(self):
         try:
@@ -390,15 +497,13 @@ class RemoteViewerApp(App):
                 payload = self.recv_all(secure_sock, payload_size)
                 data = json.loads(payload.decode('utf-8'))
                 Clock.schedule_once(lambda dt: self._update_sys_info_ui(data))
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self.stop_sys_info_updates())
+        except Exception: Clock.schedule_once(lambda dt: self.stop_sys_info_updates())
 
     def _update_sys_info_ui(self, data):
         if 'error' in data:
             self.sys_info_labels['node_name'].text = f"Erreur: {data['error']}"
             return
-        for key, label in self.sys_info_labels.items():
-            label.text = str(data.get(key, '-'))
+        for key, label in self.sys_info_labels.items(): label.text = str(data.get(key, '-'))
         cpu_info = data.get('cpu', {})
         cpu_usage = cpu_info.get('usage', 0)
         freq_current = cpu_info.get('freq_current', 0)
@@ -409,9 +514,7 @@ class RemoteViewerApp(App):
             bar = ColorProgressBar(max=100)
             percent_label = Label(text="0%")
             freq_label = Label(text="Freq: -")
-            box.add_widget(bar)
-            box.add_widget(percent_label)
-            box.add_widget(freq_label)
+            box.add_widget(bar); box.add_widget(percent_label); box.add_widget(freq_label)
             self.sys_info_bars_grid.add_widget(box)
             self.sys_info_widgets['cpu'] = {'bar': bar, 'percent': percent_label, 'freq': freq_label}
         self.sys_info_widgets['cpu']['bar'].value = cpu_usage
@@ -428,8 +531,7 @@ class RemoteViewerApp(App):
             box.add_widget(Label(text="RAM Usage"))
             bar = ColorProgressBar(max=100)
             percent_label = Label(text="0%")
-            box.add_widget(bar)
-            box.add_widget(percent_label)
+            box.add_widget(bar); box.add_widget(percent_label)
             self.sys_info_bars_grid.add_widget(box)
             self.sys_info_widgets['ram'] = {'bar': bar, 'percent': percent_label}
         ram_info = data.get('ram', {})
@@ -446,8 +548,7 @@ class RemoteViewerApp(App):
                 box.add_widget(Label(text=f"Disk: {disk.get('mountpoint', disk_id)}"))
                 bar = ColorProgressBar(max=100)
                 percent_label = Label(text="0%")
-                box.add_widget(bar)
-                box.add_widget(percent_label)
+                box.add_widget(bar); box.add_widget(percent_label)
                 self.sys_info_bars_grid.add_widget(box)
                 self.sys_info_widgets[disk_id] = {'bar': bar, 'percent': percent_label}
             disk_percent = disk.get('percent', 0)
@@ -499,10 +600,8 @@ class RemoteViewerApp(App):
             Clock.schedule_once(lambda dt: setattr(self.transfer_status_label, 'text', f"Erreur: {e}"))
 
     def update_file_browser(self, data):
-        if 'error' in data and data['error']:
-            self.transfer_status_label.text = f"Erreur distante: {data['error']}"
-        else:
-            self.transfer_status_label.text = "Prêt."
+        if 'error' in data and data['error']: self.transfer_status_label.text = f"Erreur distante: {data['error']}"
+        else: self.transfer_status_label.text = "Prêt."
         self.current_remote_path = data.get('path', self.current_remote_path)
         self.remote_path_label.text = f"/{self.current_remote_path}"
         self.file_browser_grid.clear_widgets()
@@ -595,8 +694,7 @@ class RemoteViewerApp(App):
                 with open(save_path, 'wb') as f:
                     while bytes_received < filesize:
                         if self.cancel_transfer_flag.is_set():
-                            update_status("Téléchargement annulé.")
-                            update_progress(0)
+                            update_status("Téléchargement annulé."); update_progress(0)
                             return
                         chunk_size = min(65536, filesize - bytes_received)
                         chunk = secure_sock.recv(chunk_size)
@@ -628,10 +726,8 @@ class RemoteViewerApp(App):
                 command_bytes = command_str.encode('utf-8')
                 len_info = struct.pack("!H", len(command_bytes))
                 self.remote_widget.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            except Exception as e:
-                print(f"[!] Erreur lors de l'envoi du presse-papiers au serveur: {e}")
+            except (BrokenPipeError, ConnectionResetError): pass
+            except Exception as e: print(f"[!] Erreur lors de l'envoi du presse-papiers au serveur: {e}")
 
     def send_chat_message(self, instance):
         message = self.chat_input.text.strip()
@@ -644,17 +740,13 @@ class RemoteViewerApp(App):
                     self.remote_widget.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
                     self.add_message_to_chat_history(f"[b][color=00BFFF]Moi:[/color][/b] {message}")
                     self.chat_input.text = ''
-                except (BrokenPipeError, ConnectionResetError):
-                    self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Serveur déconnecté.")
-                except Exception as e:
-                    self.add_message_to_chat_history(f"[b][color=FF0000]Erreur:[/color][/b] {e}")
-            else:
-                self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Non connecté au serveur.")
+                except (BrokenPipeError, ConnectionResetError): self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Serveur déconnecté.")
+                except Exception as e: self.add_message_to_chat_history(f"[b][color=FF0000]Erreur:[/color][/b] {e}")
+            else: self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Non connecté au serveur.")
 
     def add_message_to_chat_history(self, message):
         self.chat_history_messages.append(message)
-        if len(self.chat_history_messages) > 100:
-            self.chat_history_messages = self.chat_history_messages[-100:]
+        if len(self.chat_history_messages) > 100: self.chat_history_messages = self.chat_history_messages[-100:]
         Clock.schedule_once(lambda dt: self._update_chat_history_ui_text())
 
     def _update_chat_history_ui_text(self):
@@ -668,15 +760,12 @@ class RemoteViewerApp(App):
             self.last_clipboard_content = pyperclip.paste()
             while not self.clipboard_stop_event.is_set():
                 current_clipboard = pyperclip.paste()
-                if current_clipboard != self.last_clipboard_content and \
-                   current_clipboard != self.last_clipboard_content_from_server:
+                if current_clipboard != self.last_clipboard_content and current_clipboard != self.last_clipboard_content_from_server:
                     self.last_clipboard_content = current_clipboard
                     self.send_clipboard_to_server(current_clipboard)
                 time.sleep(0.5)
-        except Exception as e:
-            print(f"[!] Erreur dans monitor_clipboard_changes: {e}")
-        finally:
-            pythoncom.CoUninitialize()
+        except Exception as e: print(f"[!] Erreur dans monitor_clipboard_changes: {e}")
+        finally: pythoncom.CoUninitialize()
 
     def discover_server(self, instance):
         self.status_label.text = "Recherche d'un serveur..."
@@ -696,38 +785,50 @@ class RemoteViewerApp(App):
             if response == "HOSANNA_REMOTE_DISCOVERY_RESPONSE":
                 server_ip = server_address[0]
                 Clock.schedule_once(lambda dt: self.update_ip_address(server_ip))
-            else:
-                Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Réponse inattendue du serveur."))
-        except socket.timeout:
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Aucun serveur trouvé sur le réseau."))
-        except Exception as e:
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', f"Erreur: {e}"))
-        finally:
-            client_socket.close()
+            else: Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Réponse inattendue du serveur."))
+        except socket.timeout: Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Aucun serveur trouvé sur le réseau."))
+        except Exception as e: Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', f"Erreur: {e}"))
+        finally: client_socket.close()
 
     def update_ip_address(self, ip):
         self.ip_input.text = ip
         self.status_label.text = f"Serveur trouvé à l'adresse {ip} !"
 
     def connect_to_server(self, instance):
-        host, port = self.ip_input.text, int(self.port_input.text)
+        host = self.ip_input.text.strip()
+        port_str = self.port_input.text.strip()
+        if not host or not port_str:
+            self.status_label.text = "L'adresse IP et le port sont requis."
+            return
+        try:
+            port = int(port_str)
+        except ValueError:
+            self.status_label.text = "Le port doit être un nombre valide."
+            return
         self.status_label.text = f"Connexion à {host}:{port}..."
         threading.Thread(target=self.receive_frames, args=(host, port), daemon=True).start()
-        Clock.schedule_once(lambda dt: self.list_remote_dir(""), 2)
 
     def receive_frames(self, host, port):
         context = ssl.create_default_context(); context.check_hostname = False; context.verify_mode = ssl.CERT_NONE
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
             client_socket = context.wrap_socket(sock, server_hostname=host)
             client_socket.connect((host, port))
+            client_socket.settimeout(None)
             self.remote_widget.client_socket = client_socket
             self.send_quality_setting(70)
             Clock.schedule_once(self.switch_to_remote_screen)
             self.clipboard_stop_event.clear()
             threading.Thread(target=self.monitor_clipboard_changes, daemon=True).start()
+        except ConnectionRefusedError:
+            Clock.schedule_once(lambda dt: self.show_connection_error("Connexion refusée. Vérifiez l'IP, le port et le statut du serveur."))
+        except socket.timeout:
+            Clock.schedule_once(lambda dt: self.show_connection_error("Délai de connexion dépassé. Le serveur ne répond pas."))
+        except socket.gaierror:
+            Clock.schedule_once(lambda dt: self.show_connection_error("Adresse IP ou nom d'hôte invalide."))
         except Exception as e:
-            Clock.schedule_once(lambda dt, err=str(e): self.show_connection_error(err))
+            Clock.schedule_once(lambda dt, err=str(e): self.show_connection_error(f"Erreur inattendue: {err}"))
         else:
             while True:
                 try:
@@ -758,25 +859,23 @@ class RemoteViewerApp(App):
                                 pyperclip.copy(content)
                                 self.last_clipboard_content = content
                                 self.last_clipboard_content_from_server = content
-                            except Exception as e:
-                                print(f"[!] Erreur lors de la mise à jour du presse-papiers client: {e}")
+                            except Exception as e: print(f"[!] Erreur lors de la mise à jour du presse-papiers client: {e}")
                         elif cmd_type == 'CHAT_MESSAGE_FROM_SERVER':
                             message = value_str
                             self.add_message_to_chat_history(f"[b][color=00FF00]Serveur:[/color][/b] {message}")
-                        else:
-                            pass
-                    else:
-                        break
-                except (ConnectionResetError, BrokenPipeError):
-                    break
-                except Exception as e:
-                    print(f"[!] Erreur inattendue dans receive_frames: {e}")
-                    break
+                        else: pass
+                    else: break
+                except (ConnectionResetError, BrokenPipeError): break
+                except Exception as e: print(f"[!] Erreur inattendue dans receive_frames: {e}"); break
             if self.remote_widget.client_socket:
                 self.remote_widget.client_socket.close(); self.remote_widget.client_socket = None
             Clock.schedule_once(self.switch_to_connect_screen)
 
-    def switch_to_remote_screen(self, dt): self.sm.current = 'remote'; self.remote_widget.setup_keyboard()
+    def switch_to_remote_screen(self, dt):
+        self.sm.current = 'remote'
+        self.remote_widget.setup_keyboard()
+        self.list_remote_dir("")
+
     def switch_to_connect_screen(self, dt):
         self.remote_widget.release_keyboard()
         self.clipboard_stop_event.set()
@@ -800,7 +899,7 @@ class RemoteViewerApp(App):
             core_image = CoreImage(buf, ext='jpg')
             self.remote_widget.texture = core_image.texture
         except Exception as e:
-            print(f"[!] Erreur de décodage d'image: {e}")
+            print(f"[!] Erreur de décodage d'image (trame ignorée): {e}")
 
 if __name__ == '__main__':
     RemoteViewerApp().run()
