@@ -184,7 +184,7 @@ Builder.load_string('''
                         radius: [dp(8),]
                 TextInput:
                     id: port_input
-                    hint_text: 'Port (ex: 1981)'
+                    hint_text: 'Port (ex: 2000)'
                     multiline: False
                     background_color: 0,0,0,0
                     foreground_color: get_color_from_hex('#FFFFFF')
