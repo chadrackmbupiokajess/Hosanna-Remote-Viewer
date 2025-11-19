@@ -401,6 +401,7 @@ class RemoteViewerApp(App):
         self.sm = ScreenManager()
         self.sys_info_update_event = None
         self.current_remote_path = ""
+        self.current_dir_entries = []
         self.cancel_transfer_flag = threading.Event()
         self.clipboard_stop_event = threading.Event()
         self.last_clipboard_content = ""
@@ -423,9 +424,9 @@ class RemoteViewerApp(App):
 
         # --- Onglet Infos Système (Design Compact) ---
         self.sys_info_tab = TabbedPanelItem(text='Infos Système')
-        
+
         sys_info_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
+
         self.sys_info_labels = {}
         self.sys_info_widgets = {}
 
@@ -436,7 +437,7 @@ class RemoteViewerApp(App):
 
         resources_card, self.resources_layout = self._create_resources_card()
         sys_info_layout.add_widget(resources_card)
-        
+
         self.sys_info_tab.add_widget(sys_info_layout)
         self.tab_panel.add_widget(self.sys_info_tab)
 
@@ -444,7 +445,7 @@ class RemoteViewerApp(App):
         settings_tab = TabbedPanelItem(text='Paramètres')
 
         root_layout = BoxLayout(padding=dp(30), orientation='vertical')
-        
+
         quality_card = BoxLayout(
             orientation='vertical',
             size_hint_y=None,
@@ -460,7 +461,7 @@ class RemoteViewerApp(App):
                 pos=quality_card.pos,
                 radius=[dp(15)]
             )
-        
+
         quality_card.bind(
             pos=lambda i, v: setattr(self.quality_card_rect, 'pos', v),
             size=lambda i, v: setattr(self.quality_card_rect, 'size', v)
@@ -489,7 +490,7 @@ class RemoteViewerApp(App):
             value_track_color=get_color_from_hex('#5865F2'),
             cursor_size=(dp(20), dp(20))
         )
-        
+
         self.quality_label = Label(text='70%', size_hint_x=None, width=dp(50), color=get_color_from_hex('#FFFFFF'))
 
         def update_quality(instance, value):
@@ -504,14 +505,14 @@ class RemoteViewerApp(App):
         quality_card.add_widget(slider_layout)
 
         root_layout.add_widget(quality_card)
-        root_layout.add_widget(BoxLayout()) 
+        root_layout.add_widget(BoxLayout())
 
         settings_tab.add_widget(root_layout)
         self.tab_panel.add_widget(settings_tab)
 
         # --- Onglet Transferts (Fusionné et Redesigné) ---
         self.transfer_tab = TabbedPanelItem(text='Transferts')
-        
+
         main_transfer_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
 
         # Carte pour l'explorateur de fichiers
@@ -523,8 +524,7 @@ class RemoteViewerApp(App):
             pos=lambda i, v: setattr(remote_files_card.rect, 'pos', v),
             size=lambda i, v: setattr(remote_files_card.rect, 'size', v)
         )
-        
-        # Barre d'outils de navigation
+
         toolbar = BoxLayout(size_hint_y=None, height=dp(40), padding=(dp(5), 0), spacing=dp(10))
         up_button = Button(text='⬆', font_name='seguisym.ttf', font_size='20sp', on_press=self.go_up_dir, size_hint_x=None, width=dp(40))
         self.remote_path_label = Label(text='/', halign='left', valign='middle', color=get_color_from_hex('#FFFFFF'))
@@ -535,7 +535,13 @@ class RemoteViewerApp(App):
         toolbar.add_widget(refresh_button)
         remote_files_card.add_widget(toolbar)
 
-        # En-tête de la liste de fichiers
+        self.file_search_input = TextInput(
+            hint_text="Rechercher...", multiline=False,
+            size_hint_y=None, height=dp(35)
+        )
+        self.file_search_input.bind(text=self.filter_remote_files)
+        remote_files_card.add_widget(self.file_search_input)
+
         header = BoxLayout(size_hint_y=None, height=dp(30), padding=(dp(10), 0))
         header.add_widget(Label(text='', size_hint_x=None, width=dp(30)))
         header.add_widget(Label(text='Nom', bold=True, halign='left', color=get_color_from_hex('#99AAB5')))
@@ -548,7 +554,6 @@ class RemoteViewerApp(App):
         scroll_view_files.add_widget(self.file_browser_grid)
         remote_files_card.add_widget(scroll_view_files)
 
-        # Carte pour les contrôles de transfert
         transfer_controls_card = BoxLayout(
             orientation='vertical', size_hint_y=None, height=dp(180),
             padding=dp(20), spacing=dp(10)
@@ -628,13 +633,52 @@ class RemoteViewerApp(App):
         self.tab_panel.add_widget(self.chat_tab)
 
         about_tab = TabbedPanelItem(text='À propos')
-        about_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(10))
-        about_layout.add_widget(Label(text='[b]Hosanna Remote Viewer[/b]', markup=True, font_size='20sp', size_hint_y=None, height=dp(40)))
-        about_layout.add_widget(Label(text='Version: 1.0.0', size_hint_y=None, height=dp(30)))
-        about_layout.add_widget(Label(text='Développé par: Chadrak', size_hint_y=None, height=dp(30)))
-        about_layout.add_widget(Label(text='Année: 2024', size_hint_y=None, height=dp(30)))
-        about_layout.add_widget(Label(text='[b]Description:[/b]', markup=True, size_hint_y=None, height=dp(30)))
-        about_layout.add_widget(Label(text='Application de visualisation et de contrôle à distance sécurisée.', halign='center', valign='middle'))
+        about_layout = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
+
+        # Carte principale avec logo et titre
+        title_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), padding=dp(20), spacing=dp(15))
+        with title_card.canvas.before:
+            Color(rgba=get_color_from_hex('#2C2F33'))
+            title_card.rect = RoundedRectangle(size=title_card.size, pos=title_card.pos, radius=[dp(15)])
+        title_card.bind(pos=lambda i, v: setattr(title_card.rect, 'pos', v), size=lambda i, v: setattr(title_card.rect, 'size', v))
+
+        logo = Image(source='logo.ico', size_hint_y=None, height=dp(80), allow_stretch=True)
+        title_label = Label(text='[b]Hosanna Remote Viewer[/b]', markup=True, font_size='24sp', size_hint_y=None, height=dp(40), color=get_color_from_hex('#FFFFFF'))
+        version_label = Label(text='Version 1.0.0', font_size='14sp', size_hint_y=None, height=dp(20), color=get_color_from_hex('#99AAB5'))
+        
+        title_card.add_widget(logo)
+        title_card.add_widget(title_label)
+        title_card.add_widget(version_label)
+        about_layout.add_widget(title_card)
+
+        # Carte des informations
+        info_card = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(20), spacing=dp(10))
+        info_card.bind(minimum_height=info_card.setter('height'))
+        with info_card.canvas.before:
+            Color(rgba=get_color_from_hex('#2C2F33'))
+            info_card.rect = RoundedRectangle(size=info_card.size, pos=info_card.pos, radius=[dp(15)])
+        info_card.bind(pos=lambda i, v: setattr(info_card.rect, 'pos', v), size=lambda i, v: setattr(info_card.rect, 'size', v))
+
+        info_card.add_widget(Label(text='[b]Développé par :[/b] Chadrack Mbu Jess', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
+        info_card.add_widget(Label(text='© 2025', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
+        
+        desc_title = Label(text='[b]Description :[/b]', markup=True, font_size='16sp', size_hint_y=None, height=dp(40), color=get_color_from_hex('#FFFFFF'), halign='left')
+        desc_title.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
+        info_card.add_widget(desc_title)
+        
+        description = Label(
+            text='Une application de bureau à distance sécurisée et performante, conçue pour offrir un contrôle fluide et un accès facile à vos fichiers et informations système.',
+            font_size='14sp',
+            color=get_color_from_hex('#99AAB5'),
+            halign='left',
+            valign='top'
+        )
+        description.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
+        info_card.add_widget(description)
+
+        about_layout.add_widget(info_card)
+        about_layout.add_widget(BoxLayout()) # Pour pousser les cartes vers le haut
+
         about_tab.add_widget(about_layout)
         self.tab_panel.add_widget(about_tab)
 
@@ -652,7 +696,7 @@ class RemoteViewerApp(App):
         card.bind(pos=lambda i, v: setattr(card.rect, 'pos', v), size=lambda i, v: setattr(card.rect, 'size', v))
 
         card.add_widget(Label(text='Informations Générales', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
-        
+
         grid = GridLayout(cols=2, spacing=dp(2))
         info_keys = {"node_name": "Nom", "user_name": "Utilisateur", "os_version": "OS", "architecture": "Arch"}
         for key, name in info_keys.items():
@@ -671,7 +715,7 @@ class RemoteViewerApp(App):
         card.bind(pos=lambda i, v: setattr(card.rect, 'pos', v), size=lambda i, v: setattr(card.rect, 'size', v))
 
         card.add_widget(Label(text='Ressources Système', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
-        
+
         resources_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10))
         resources_layout.bind(minimum_height=resources_layout.setter('height'))
 
@@ -690,7 +734,7 @@ class RemoteViewerApp(App):
 
     def _create_resource_section(self, key, title):
         section = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(65), spacing=dp(2))
-        
+
         title_layout = BoxLayout(size_hint_y=None, height=dp(20))
         title_label = Label(text=title, font_size='14sp', halign='left', color=get_color_from_hex('#FFFFFF'))
         title_label.bind(text_size=lambda i, ts: setattr(i, 'width', ts[0]))
@@ -700,15 +744,15 @@ class RemoteViewerApp(App):
             freq_label = Label(text="Freq: -", size_hint_x=None, width=dp(150), font_size='12sp', halign='right', color=get_color_from_hex('#99AAB5'))
             self.sys_info_widgets['cpu_freq'] = freq_label
             title_layout.add_widget(freq_label)
-        
+
         section.add_widget(title_layout)
 
         bar = ColorProgressBar(max=100, size_hint_y=None, height=dp(10))
         percent_label = Label(text="0%", size_hint_y=None, height=dp(20), font_size='12sp', halign='left', color=get_color_from_hex('#FFFFFF'))
         percent_label.bind(text_size=lambda i, ts: setattr(i, 'width', ts[0]))
-        
+
         self.sys_info_widgets[key] = {'bar': bar, 'percent': percent_label}
-        
+
         section.add_widget(bar)
         section.add_widget(percent_label)
         return section
@@ -754,7 +798,7 @@ class RemoteViewerApp(App):
         if 'error' in data:
             self.sys_info_labels['node_name'].text = f"Erreur: {data['error']}"
             return
-        
+
         for key, label in self.sys_info_labels.items():
             label.text = str(data.get(key, '-'))
 
@@ -765,7 +809,7 @@ class RemoteViewerApp(App):
         if cpu_usage >= 95: self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0, 0.15, 1)
         elif cpu_usage >= 80: self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0.65, 0, 1)
         else: self.sys_info_widgets['cpu']['bar'].bar_color = (0, 0.55, 1, 1)
-        
+
         freq_current = cpu_info.get('freq_current', 0)
         freq_max = cpu_info.get('freq_max', 0)
         freq_text = "Freq: "
@@ -833,17 +877,24 @@ class RemoteViewerApp(App):
                 data = json.loads(payload.decode('utf-8'))
                 Clock.schedule_once(lambda dt: self.update_file_browser(data))
         except Exception as e:
-            Clock.schedule_once(lambda dt: setattr(self.transfer_status_label, 'text', f"Erreur: {e}"))
+            Clock.schedule_once(lambda dt, err=e: setattr(self.transfer_status_label, 'text', f"Erreur: {err}"))
 
     def update_file_browser(self, data):
         if 'error' in data and data['error']: self.transfer_status_label.text = f"Erreur distante: {data['error']}"
         else: self.transfer_status_label.text = "Prêt."
         self.current_remote_path = data.get('path', self.current_remote_path)
         self.remote_path_label.text = f"/{self.current_remote_path}"
+        self.current_dir_entries = data.get('entries', [])
+        self.file_search_input.text = ""
+        self.filter_remote_files(self.file_search_input, "")
+
+    def filter_remote_files(self, instance, search_text=""):
+        search_text = instance.text.lower()
         self.file_browser_grid.clear_widgets()
-        for entry in data.get('entries', []):
-            widget = FileEntryWidget(name=entry['name'], is_dir=entry['is_dir'], file_size="" if entry['is_dir'] else sizeof_fmt(entry.get('size', 0)))
-            self.file_browser_grid.add_widget(widget)
+        for entry in self.current_dir_entries:
+            if search_text in entry['name'].lower():
+                widget = FileEntryWidget(name=entry['name'], is_dir=entry['is_dir'], file_size="" if entry['is_dir'] else sizeof_fmt(entry.get('size', 0)))
+                self.file_browser_grid.add_widget(widget)
 
     def choose_and_upload_file(self, instance):
         Tk().withdraw()
@@ -1021,7 +1072,8 @@ class RemoteViewerApp(App):
                 Clock.schedule_once(lambda dt: self.update_ip_address(server_ip))
             else: Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Réponse inattendue du serveur."))
         except socket.timeout: Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Aucun serveur trouvé sur le réseau."))
-        except Exception as e: Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', f"Erreur: {e}"))
+        except Exception as e:
+            Clock.schedule_once(lambda dt, err=e: setattr(self.status_label, 'text', f"Erreur: {err}"))
         finally: client_socket.close()
 
     def update_ip_address(self, ip):
