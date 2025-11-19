@@ -8,11 +8,15 @@ import sys
 import os
 import json
 import ctypes
+import platform
+import psutil
 from queue import Queue, Empty
 from PIL import Image
 import mss
 from pynput.mouse import Button, Controller as MouseController
 from pynput.keyboard import Key, Controller as KeyboardController
+# from GPU import get_gpu_info # Supprimé
+# import pythoncom # Supprimé
 
 # --- Dictionnaire de touches (inchangé) ---
 KEY_MAP = {
@@ -49,7 +53,7 @@ def command_processor(stop_event):
             for cmd in commands:
                 if cmd[0] == 'MV': last_move = cmd
                 else: other_commands.append(cmd)
-            
+
             if last_move:
                 mouse_ctrl.position = last_move[1]
 
@@ -87,15 +91,14 @@ def recv_all(sock, n):
             if not packet: return None
             data.extend(packet)
         except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
-            # Non-blocking socket would wait here, but we are blocking
             continue
         except (ConnectionResetError, BrokenPipeError):
-            return None # Client disconnected
+            return None
     return data
 
 def handle_client(client_socket):
     stop_event = threading.Event()
-    session_settings = {'jpeg_quality': 70} 
+    session_settings = {'jpeg_quality': 70}
 
     processor_thread = threading.Thread(target=command_processor, args=(stop_event,))
     processor_thread.daemon = True
@@ -110,7 +113,7 @@ def handle_client(client_socket):
                 command_data = recv_all(client_socket, cmd_len)
                 if not command_data: break
                 command = command_data.decode('utf-8')
-                
+
                 parts = command.split(',', 1)
                 cmd_type = parts[0]
                 value_str = parts[1] if len(parts) > 1 else ""
@@ -166,6 +169,57 @@ def handle_client(client_socket):
     print("[-] Un thread client s'est arrêté, fermeture de la connexion.")
     client_socket.close()
 
+def get_system_info():
+    try:
+        uname = platform.uname()
+        sys_info = {
+            "node_name": uname.node,
+            "user_name": psutil.users()[0].name if psutil.users() else "N/A",
+            "os_version": platform.platform(),
+            "architecture": uname.machine,
+        }
+
+        cpu_usage = psutil.cpu_percent(interval=0.1)
+        cpu_freq = psutil.cpu_freq()
+        sys_info["cpu"] = {
+            "usage": cpu_usage,
+            "freq_current": cpu_freq.current if cpu_freq else 0,
+            "freq_max": cpu_freq.max if cpu_freq else 0,
+        }
+
+        ram = psutil.virtual_memory()
+        sys_info["ram"] = {
+            "total": ram.total,
+            "used": ram.used,
+            "percent": ram.percent
+        }
+
+        partitions_info = []
+        partitions = psutil.disk_partitions()
+        for p in partitions:
+            try:
+                usage = psutil.disk_usage(p.mountpoint)
+                partitions_info.append({
+                    "device": p.device,
+                    "mountpoint": p.mountpoint,
+                    "total": usage.total,
+                    "used": usage.used,
+                    "percent": usage.percent
+                })
+            except (PermissionError, FileNotFoundError):
+                continue
+        sys_info["disks"] = partitions_info
+
+        # sys_info["gpus"] = [] # Supprimé la logique GPU
+
+        print(f"[*] Infos système collectées: {sys_info}") # Ligne de débogage ajoutée
+        return sys_info
+    except Exception as e:
+        print(f"[*] Erreur dans get_system_info: {e}", file=sys.stderr)
+        return {"error": str(e)}
+    # finally: # Supprimé
+        # pythoncom.CoUninitialize() # Supprimé
+
 def get_downloads_folder():
     try:
         import winreg
@@ -189,7 +243,7 @@ def handle_file_transfer(client_socket):
     try:
         len_info = recv_all(client_socket, 2)
         if not len_info: return
-        
+
         header_len = struct.unpack("!H", len_info)[0]
         header_data = recv_all(client_socket, header_len)
         if not header_data: return
@@ -197,20 +251,20 @@ def handle_file_transfer(client_socket):
         header_str = header_data.decode('utf-8')
         parts = header_str.split(',', 1)
         command = parts[0]
-        
+
         if command == 'UPLOAD':
             _, filename, filesize_str = header_str.split(',')
             filesize = int(filesize_str)
             filename = os.path.basename(filename)
-            
+
             downloads_path = get_downloads_folder()
             reception_path = os.path.join(downloads_path, "Hosanna Tv Reception")
             if not os.path.exists(reception_path):
                 os.makedirs(reception_path)
-            
+
             save_path = os.path.join(reception_path, filename)
             print(f"[*] Réception de '{filename}' ({filesize} octets) vers '{save_path}'")
-            
+
             bytes_received = 0
             interrupted = False
             try:
@@ -255,11 +309,11 @@ def handle_file_transfer(client_socket):
                             continue
                 except (OSError, PermissionError):
                     error_msg = "Accès refusé"
-                
+
                 entries.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
                 response_dict = {'path': req_path, 'entries': entries, 'error': error_msg}
                 response_data = json.dumps(response_dict).encode('utf-8')
-            
+
             if response_data:
                 len_prefix = struct.pack("!I", len(response_data))
                 client_socket.sendall(len_prefix + response_data)
@@ -284,6 +338,12 @@ def handle_file_transfer(client_socket):
                     print(f"[*] Connexion fermée par le client pendant l'envoi de '{req_path}'. Annulé.")
                 except Exception as e:
                     print(f"[!] Erreur pendant l'envoi du fichier '{req_path}': {e}")
+
+        elif command == 'GET_SYS_INFO':
+            info = get_system_info()
+            response_data = json.dumps(info).encode('utf-8')
+            len_prefix = struct.pack("!I", len(response_data))
+            client_socket.sendall(len_prefix + response_data)
 
     except Exception as e:
         print(f"[!!!] ERREUR CRITIQUE transfert: {e}", file=sys.stderr)

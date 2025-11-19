@@ -28,7 +28,7 @@ from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.slider import Slider
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
-from kivy.properties import StringProperty, BooleanProperty
+from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty
 from os.path import expanduser
 
 # --- KV String for the file browser row ---
@@ -63,7 +63,27 @@ Builder.load_string('''
         halign: 'right'
         valign: 'middle'
         text_size: self.width, None
+
+<ColorProgressBar>:
+    canvas:
+        Color:
+            rgba: 0.2, 0.2, 0.2, 1 # Background color
+        BorderImage:
+            border: (12, 12, 12, 12)
+            pos: self.x, self.center_y - 12
+            size: self.width, 24
+            source: 'atlas://data/images/defaulttheme/progressbar_background'
+        Color:
+            rgba: self.bar_color
+        BorderImage:
+            border: [int(min(self.width * (self.value / float(self.max)) if self.max else 0, 12))] * 4
+            pos: self.x, self.center_y - 12
+            size: self.width * (self.value / float(self.max)) if self.max else 0, 24
+            source: 'atlas://data/images/defaulttheme/progressbar'
 ''')
+
+class ColorProgressBar(ProgressBar):
+    bar_color = ColorProperty([0.2, 0.6, 0.8, 1]) # Default blue
 
 # --- Fonctions utilitaires pour la taille des fichiers ---
 def sizeof_fmt(num, suffix="B"):
@@ -185,6 +205,10 @@ class FileEntryWidget(BoxLayout):
 class RemoteViewerApp(App):
     def build(self):
         self.sm = ScreenManager()
+        self.sys_info_update_event = None
+        self.current_remote_path = ""
+        self.cancel_transfer_flag = threading.Event()
+
         connect_screen = Screen(name='connect')
         layout = BoxLayout(orientation='vertical', padding=30, spacing=10)
         grid = GridLayout(cols=2, spacing=10, size_hint_y=None, height=100)
@@ -203,11 +227,36 @@ class RemoteViewerApp(App):
 
         remote_screen = Screen(name='remote')
         self.tab_panel = TabbedPanel(do_default_tab=False)
-        
+        self.tab_panel.bind(current_tab=self.on_tab_switch)
+
         self.desktop_tab = TabbedPanelItem(text='Bureau')
         self.remote_widget = RemoteDesktopWidget()
         self.desktop_tab.add_widget(self.remote_widget)
         self.tab_panel.add_widget(self.desktop_tab)
+
+        # --- Onglet Infos Système ---
+        self.sys_info_tab = TabbedPanelItem(text='Infos Système')
+        sys_info_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+
+        self.sys_info_labels_grid = GridLayout(cols=2, size_hint_y=None, height=dp(120))
+        self.sys_info_labels = {
+            "node_name": Label(text="Nom: -"), "user_name": Label(text="Utilisateur: -"),
+            "os_version": Label(text="OS: -"), "architecture": Label(text="Arch: -")
+        }
+        for key in ["node_name", "user_name", "os_version", "architecture"]:
+            self.sys_info_labels_grid.add_widget(Label(text=key.replace('_', ' ').title() + ':', halign='right'))
+            self.sys_info_labels_grid.add_widget(self.sys_info_labels[key])
+
+        self.sys_info_bars_grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
+        self.sys_info_bars_grid.bind(minimum_height=self.sys_info_bars_grid.setter('height'))
+        self.sys_info_widgets = {}
+
+        scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        scroll_view.add_widget(self.sys_info_bars_grid)
+        sys_info_layout.add_widget(self.sys_info_labels_grid)
+        sys_info_layout.add_widget(scroll_view)
+        self.sys_info_tab.add_widget(sys_info_layout)
+        self.tab_panel.add_widget(self.sys_info_tab)
 
         settings_tab = TabbedPanelItem(text='Paramètres')
         settings_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
@@ -223,7 +272,7 @@ class RemoteViewerApp(App):
         transfer_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
         self.transfer_status_label = Label(text='Prêt.', size_hint_y=None, height=40)
         self.transfer_progress_bar = ProgressBar(max=100, size_hint_y=None, height=20)
-        
+
         transfer_buttons = BoxLayout(size_hint_y=None, height=40, spacing=5)
         send_file_button = Button(text='Envoyer un fichier...', on_press=self.choose_and_upload_file)
         self.cancel_button = Button(text='Annuler', on_press=self.cancel_transfer)
@@ -240,7 +289,7 @@ class RemoteViewerApp(App):
         download_tab = TabbedPanelItem(text='Fichiers Distants')
         download_layout = BoxLayout(orientation='vertical', padding=10, spacing=5)
         self.remote_path_label = Label(text='/', size_hint_y=None, height=30)
-        
+
         button_layout = BoxLayout(size_hint_y=None, height=40, spacing=5)
         up_button = Button(text='..', on_press=self.go_up_dir)
         refresh_button = Button(text='Actualiser', on_press=lambda i: self.list_remote_dir(self.current_remote_path))
@@ -249,24 +298,233 @@ class RemoteViewerApp(App):
 
         self.file_browser_grid = GridLayout(cols=1, size_hint_y=None)
         self.file_browser_grid.bind(minimum_height=self.file_browser_grid.setter('height'))
-        scroll_view = ScrollView()
-        scroll_view.add_widget(self.file_browser_grid)
-        
+        scroll_view_files = ScrollView()
+        scroll_view_files.add_widget(self.file_browser_grid)
+
         download_layout.add_widget(button_layout)
         download_layout.add_widget(self.remote_path_label)
-        download_layout.add_widget(scroll_view)
+        download_layout.add_widget(scroll_view_files)
         download_tab.add_widget(download_layout)
         self.tab_panel.add_widget(download_tab)
-        
+
         self.tab_panel.default_tab = self.desktop_tab
         remote_screen.add_widget(self.tab_panel)
 
         self.sm.add_widget(connect_screen)
         self.sm.add_widget(remote_screen)
-        
-        self.current_remote_path = ""
-        self.cancel_transfer_flag = threading.Event()
+
         return self.sm
+
+    def on_tab_switch(self, instance, value):
+        if value == self.sys_info_tab:
+            self.start_sys_info_updates()
+        else:
+            self.stop_sys_info_updates()
+
+    def start_sys_info_updates(self):
+        if not self.sys_info_update_event:
+            self._request_sys_info_thread()
+            self.sys_info_update_event = Clock.schedule_interval(lambda dt: self._request_sys_info_thread(), 1)
+
+    def stop_sys_info_updates(self):
+        if self.sys_info_update_event:
+            self.sys_info_update_event.cancel()
+            self.sys_info_update_event = None
+
+    def _request_sys_info_thread(self):
+        threading.Thread(target=self._get_sys_info_from_server, daemon=True).start()
+
+    def _get_sys_info_from_server(self):
+        try:
+            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
+            header_str = "GET_SYS_INFO"
+            header_bytes = header_str.encode('utf-8')
+            len_info = struct.pack("!H", len(header_bytes))
+            context = ssl.create_default_context(); context.check_hostname = False; context.verify_mode = ssl.CERT_NONE
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                secure_sock = context.wrap_socket(sock, server_hostname=host)
+                secure_sock.connect((host, file_port))
+                secure_sock.sendall(len_info + header_bytes)
+                len_info = self.recv_all(secure_sock, 4)
+                if not len_info: return
+                payload_size = struct.unpack("!I", len_info)[0]
+                payload = self.recv_all(secure_sock, payload_size)
+                data = json.loads(payload.decode('utf-8'))
+                Clock.schedule_once(lambda dt: self._update_sys_info_ui(data))
+        except Exception as e:
+            print(f"Erreur de récupération des infos système: {e}")
+            Clock.schedule_once(lambda dt: self.stop_sys_info_updates())
+
+    def _update_sys_info_ui(self, data):
+        if 'error' in data:
+            self.sys_info_labels['node_name'].text = f"Erreur: {data['error']}"
+            return
+
+        for key, label in self.sys_info_labels.items():
+            label.text = str(data.get(key, '-'))
+
+        # Mise à jour CPU
+        cpu_info = data.get('cpu', {})
+        cpu_usage = cpu_info.get('usage', 0)
+        freq_current = cpu_info.get('freq_current', 0)
+        freq_max = cpu_info.get('freq_max', 0)
+
+        if 'cpu' not in self.sys_info_widgets:
+            box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(70))
+            box.add_widget(Label(text="CPU Usage"))
+            bar = ColorProgressBar(max=100)
+            percent_label = Label(text="0%")
+            freq_label = Label(text="Freq: -")
+            box.add_widget(bar)
+            box.add_widget(percent_label)
+            box.add_widget(freq_label)
+            self.sys_info_bars_grid.add_widget(box)
+            self.sys_info_widgets['cpu'] = {'bar': bar, 'percent': percent_label, 'freq': freq_label}
+
+        self.sys_info_widgets['cpu']['bar'].value = cpu_usage
+        self.sys_info_widgets['cpu']['percent'].text = f"{cpu_usage:.1f}%"
+
+        # Changer la couleur de la barre de progression CPU
+        if cpu_usage >= 95:
+            # Rouge très vif et lumineux
+            self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0, 0.15, 1)
+
+
+        elif cpu_usage >= 80:
+            # Orange plus clair donc plus visible
+            self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0.65, 0, 1)
+
+        else:
+            # Bleu vif bien visible
+            self.sys_info_widgets['cpu']['bar'].bar_color = (0, 0.55, 1, 1)
+
+        freq_text = "Freq: "
+        if freq_current > 0:
+            freq_text += f"{freq_current / 1000:.2f} GHz"
+        if freq_max > 0:
+            freq_text += f" (Max: {freq_max / 1000:.2f} GHz)"
+        self.sys_info_widgets['cpu']['freq'].text = freq_text
+
+
+        # Mise à jour RAM
+        if 'ram' not in self.sys_info_widgets:
+            box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(50))
+            box.add_widget(Label(text="RAM Usage"))
+            bar = ColorProgressBar(max=100)
+            percent_label = Label(text="0%")
+            box.add_widget(bar)
+            box.add_widget(percent_label)
+            self.sys_info_bars_grid.add_widget(box)
+            self.sys_info_widgets['ram'] = {'bar': bar, 'percent': percent_label}
+
+        ram_info = data.get('ram', {})
+        ram_percent = ram_info.get('percent', 0)
+        self.sys_info_widgets['ram']['bar'].value = ram_percent
+        self.sys_info_widgets['ram']['percent'].text = f"{ram_percent:.1f}% ({sizeof_fmt(ram_info.get('used',0))} / {sizeof_fmt(ram_info.get('total',0))})"
+
+        # Changer la couleur de la barre de progression RAM
+        if ram_percent >= 95:
+            # Rouge très vif et lumineux
+            self.sys_info_widgets['ram']['bar'].bar_color = (1, 0, 0.15, 1)
+
+
+        elif ram_percent >= 80:
+            # Orange clair et très visible
+            self.sys_info_widgets['ram']['bar'].bar_color = (1, 0.65, 0, 1)
+
+        else:
+            # Bleu vif bien visible
+            self.sys_info_widgets['ram']['bar'].bar_color = (0, 0.55, 1, 1)
+
+        # Mise à jour Disques
+        for disk in data.get('disks', []):
+            disk_id = disk['device']
+            if disk_id not in self.sys_info_widgets:
+                box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(50))
+                box.add_widget(Label(text=f"Disk: {disk.get('mountpoint', disk_id)}"))
+                bar = ColorProgressBar(max=100)
+                percent_label = Label(text="0%")
+                box.add_widget(bar)
+                box.add_widget(percent_label)
+                self.sys_info_bars_grid.add_widget(box)
+                self.sys_info_widgets[disk_id] = {'bar': bar, 'percent': percent_label}
+
+            disk_percent = disk.get('percent', 0)
+            self.sys_info_widgets[disk_id]['bar'].value = disk_percent
+            self.sys_info_widgets[disk_id]['percent'].text = f"{disk_percent:.1f}% ({sizeof_fmt(disk.get('used',0))} / {sizeof_fmt(disk.get('total',0))})"
+
+            # Changer la couleur de la barre de progression Disque
+            if disk_percent >= 95:
+                # Rouge très vif et lumineux
+                self.sys_info_widgets[disk_id]['bar'].bar_color = (1, 0, 0.3, 1)
+
+            elif disk_percent >= 80:
+                # Orange clair et très visible
+                self.sys_info_widgets[disk_id]['bar'].bar_color = (1, 0.65, 0, 1)
+
+            else:
+                # Bleu vif bien visible
+                self.sys_info_widgets[disk_id]['bar'].bar_color = (0, 0.55, 1, 1)
+
+        # Supprimé: Mise à jour GPU
+        # gpus_info = data.get('gpus', [])
+        # if gpus_info:
+        #     for i, gpu in enumerate(gpus_info):
+        #         gpu_id = f"gpu_{i}"
+        #         if gpu_id not in self.sys_info_widgets:
+        #             box = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(120))
+        #             box.add_widget(Label(text=f"GPU {i}: {gpu.get('name', 'N/A')}"))
+        #             box.add_widget(Label(text="GPU Load"))
+        #             load_bar = ColorProgressBar(max=100)
+        #             load_percent_label = Label(text="0%")
+        #             box.add_widget(load_bar)
+        #             box.add_widget(load_percent_label)
+        #             box.add_widget(Label(text="GPU Memory"))
+        #             mem_bar = ColorProgressBar(max=100)
+        #             mem_percent_label = Label(text="0%")
+        #             box.add_widget(mem_bar)
+        #             box.add_widget(mem_percent_label)
+        #             temp_label = Label(text="Temp: -")
+        #             box.add_widget(temp_label)
+        #             self.sys_info_bars_grid.add_widget(box)
+        #             self.sys_info_widgets[gpu_id] = {
+        #                 'box': box,
+        #                 'load_bar': load_bar, 'load_percent': load_percent_label,
+        #                 'mem_bar': mem_bar, 'mem_percent': mem_percent_label,
+        #                 'temp_label': temp_label
+        #             }
+        #         gpu_load = gpu.get('load', 0)
+        #         self.sys_info_widgets[gpu_id]['load_bar'].value = gpu_load
+        #         self.sys_info_widgets[gpu_id]['load_percent'].text = f"{gpu_load:.1f}%"
+        #         if gpu_load >= 95:
+        #             self.sys_info_widgets[gpu_id]['load_bar'].bar_color = (1, 0, 0.3, 1)
+        #         elif gpu_load >= 80:
+        #             self.sys_info_widgets[gpu_id]['load_bar'].bar_color = (1, 0.65, 0, 1)
+        #         else:
+        #             self.sys_info_widgets[gpu_id]['load_bar'].bar_color = (0, 0.55, 1, 1)
+        #         gpu_mem_percent = gpu.get('memory_percent', 0)
+        #         gpu_mem_used = gpu.get('memory_used', 0)
+        #         gpu_mem_total = gpu.get('memory_total', 0)
+        #         self.sys_info_widgets[gpu_id]['mem_bar'].value = gpu_mem_percent
+        #         self.sys_info_widgets[gpu_id]['mem_percent'].text = f"{gpu_mem_percent:.1f}% ({sizeof_fmt(gpu_mem_used)} / {sizeof_fmt(gpu_mem_total)})"
+        #         if gpu_mem_percent >= 95:
+        #             self.sys_info_widgets[gpu_id]['mem_bar'].bar_color = (1, 0, 0.3, 1)
+        #         elif gpu_mem_percent >= 80:
+        #             self.sys_info_widgets[gpu_id]['mem_bar'].bar_color = (1, 0.65, 0, 1)
+        #         else:
+        #             self.sys_info_widgets[gpu_id]['mem_bar'].bar_color = (0, 0.55, 1, 1)
+        #         gpu_temp = gpu.get('temperature', 'N/A')
+        #         self.sys_info_widgets[gpu_id]['temp_label'].text = f"Temp: {gpu_temp}°C"
+        # else:
+        #     if 'gpu_error_message' not in self.sys_info_widgets:
+        #         error_label = Label(text="GPU Info: Not available (GPUtil not installed or no GPU detected)", size_hint_y=None, height=dp(40))
+        #         self.sys_info_bars_grid.add_widget(error_label)
+        #         self.sys_info_widgets['gpu_error_message'] = error_label
+        #     gpus_to_remove = [k for k in self.sys_info_widgets if k.startswith('gpu_') and k != 'gpu_error_message']
+        #     for gpu_id in gpus_to_remove:
+        #         self.sys_info_bars_grid.remove_widget(self.sys_info_widgets[gpu_id]['box'])
+        #         del self.sys_info_widgets[gpu_id]
+
 
     def cancel_transfer(self, instance):
         self.cancel_transfer_flag.set()
@@ -348,10 +606,10 @@ class RemoteViewerApp(App):
         try:
             filename, filesize = os.path.basename(file_path), os.path.getsize(file_path)
             update_status(f"Envoi de {filename}..."); update_progress(0)
+            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
             header_str = f"UPLOAD,{filename},{filesize}"
             header_bytes = header_str.encode('utf-8')
             len_info = struct.pack("!H", len(header_bytes))
-            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
             context = ssl.create_default_context(); context.check_hostname = False; context.verify_mode = ssl.CERT_NONE
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 secure_sock = context.wrap_socket(sock, server_hostname=host)
