@@ -1,0 +1,22 @@
+# Ignorer les fichiers sensibles
+firebase-credentials.json
+
+# Ignorer les dossiers de compilation de PyInstaller
+build/
+dist/
+*.spec
+
+# Ignorer les fichiers temporaires et de cache Python
+__pycache__/
+*.pyc
+.Python/
+.venv/
+venv/
+env/
+
+# Ignorer les fichiers spécifiques à l'IDE (si vous en utilisez un)
+.idea/
+.vscode/
+*.swp
+*.bak
+*~
