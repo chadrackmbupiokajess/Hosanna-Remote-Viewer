@@ -45,13 +45,13 @@ Builder.load_string('''
 <SpinnerOption@SpinnerOption>: # Custom styling for spinner options
     background_color: get_color_from_hex('#2C2F33')
     color: get_color_from_hex('#FFFFFF')
-    # selected_color: get_color_from_hex('#5865F2') # Cette propriété n'est pas directement utilisée ici
-    background_normal: '' # Assurez-vous que ces propriétés sont vides pour que canvas.before prenne le dessus
+    # selected_color: get_color_from_hex('#5865F2') # This property is not used directly here
+    background_normal: '' # Ensure these properties are empty for canvas.before to take over
     background_down: ''
-    # background_selected: '' # Ceci est pour le Spinner lui-même, pas ses options
+    # background_selected: '' # This is for the Spinner itself, not its options
     canvas.before:
         Color:
-            rgba: self.background_color # Utilise simplement la couleur de fond définie
+            rgba: self.background_color # Just use the defined background color
         Rectangle:
             pos: self.pos
             size: self.size
@@ -441,6 +441,9 @@ class RemoteViewerApp(App):
         self.last_clipboard_content_from_server = ""
         self.chat_history_messages = []
         self.is_camera_streaming = False # Nouveau flag pour l'état du streaming caméra
+        
+        # Load the placeholder image texture once
+        self.camera_placeholder_image = CoreImage('Hosanna Cameralogo.png')
 
         connect_screen = ConnectScreen(name='connect')
         self.ip_input = connect_screen.ids.ip_input
@@ -476,7 +479,11 @@ class RemoteViewerApp(App):
         camera_selector_layout.add_widget(self.camera_selector)
         camera_layout.add_widget(camera_selector_layout)
 
-        self.remote_camera_widget = RemoteCameraWidget(allow_stretch=True, keep_ratio=True)
+        self.remote_camera_widget = RemoteCameraWidget(
+            texture=self.camera_placeholder_image.texture, # Set initial texture
+            allow_stretch=True, 
+            keep_ratio=True
+        )
         camera_layout.add_widget(self.remote_camera_widget)
 
         camera_controls = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
@@ -694,8 +701,11 @@ class RemoteViewerApp(App):
         send_button = Button(text='Envoyer', size_hint_x=None, width=dp(80), on_press=self.send_chat_message)
         chat_input_layout.add_widget(self.chat_input)
         chat_input_layout.add_widget(send_button)
-        chat_layout.add_widget(chat_scroll_view)
-        chat_layout.add_widget(chat_input_layout) # Removed the duplicate line here
+        
+        # Add chat history and input to the main chat layout
+        for widget in [chat_scroll_view, chat_input_layout]:
+            chat_layout.add_widget(widget)
+
         self.chat_tab.add_widget(chat_layout)
         self.tab_panel.add_widget(self.chat_tab)
 
@@ -877,11 +887,13 @@ class RemoteViewerApp(App):
     def stop_camera_stream(self, instance=None): # instance=None pour pouvoir l'appeler sans événement de bouton
         if self.is_camera_streaming:
             self.remote_camera_widget.send_command("STOP_CAMERA")
-            self.is_camera_streaming = False
-            self.start_camera_button.disabled = False
-            self.stop_camera_button.disabled = True
-            self.remote_camera_widget.texture = None # Effacer l'image de la caméra
-            # Optionnel: redémarrer le streaming écran si la caméra est désactivée
+        # Always reset the state, even if the command fails to send (e.g., on disconnect)
+        self.is_camera_streaming = False
+        self.start_camera_button.disabled = False
+        self.stop_camera_button.disabled = True
+        self.remote_camera_widget.texture = self.camera_placeholder_image.texture # Revert to placeholder
+        # Optionnel: redémarrer le streaming écran si la caméra est désactivée
+        if self.remote_widget.client_socket:
             self.remote_widget.send_command("START_SCREEN")
 
     def start_sys_info_updates(self):
@@ -1352,7 +1364,10 @@ class RemoteViewerApp(App):
             print(f"[!] Erreur de décodage d'image (trame ignorée): {e}")
 
     def update_camera_feed(self, jpeg_bytes):
+        if not self.is_camera_streaming:
+            return
         try:
+            # The texture will be drawn on top of the source image.
             buf = io.BytesIO(jpeg_bytes)
             core_image = CoreImage(buf, ext='jpg')
             self.remote_camera_widget.texture = core_image.texture
