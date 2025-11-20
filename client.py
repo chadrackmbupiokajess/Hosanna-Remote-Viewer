@@ -36,6 +36,16 @@ from os.path import expanduser
 import pyperclip
 import pythoncom
 from kivy.uix.spinner import Spinner # Import Spinner
+import sys
+from kivy.resources import resource_add_path
+
+# Add this block to handle resource paths for PyInstaller
+if hasattr(sys, '_MEIPASS'):
+    resource_add_path(os.path.join(sys._MEIPASS))
+else:
+    # If running from source, add the script's directory
+    resource_add_path(os.path.dirname(os.path.abspath(__file__)))
+
 
 # --- NOUVEAU : Design amélioré avec KV String ---
 Builder.load_string('''
@@ -199,7 +209,7 @@ Builder.load_string('''
                         radius: [dp(8),]
                 TextInput:
                     id: port_input
-                    hint_text: 'Port (ex: 1981)'
+                    hint_text: 'Port (ex: 5000)'
                     multiline: False
                     background_color: 0,0,0,0
                     foreground_color: get_color_from_hex('#FFFFFF')
@@ -431,6 +441,8 @@ class RemoteViewerApp(App):
     selected_camera_index = NumericProperty(0) # New property for the currently selected camera
 
     def build(self):
+        self.title = 'HosannaRemote'
+        self.icon = 'logo.ico'
         self.sm = ScreenManager()
         self.sys_info_update_event = None
         self.current_remote_path = ""
@@ -448,6 +460,7 @@ class RemoteViewerApp(App):
         connect_screen = ConnectScreen(name='connect')
         self.ip_input = connect_screen.ids.ip_input
         self.port_input = connect_screen.ids.port_input
+
         self.status_label = connect_screen.ids.status_label
 
         remote_screen = RemoteScreen(name='remote')
@@ -1305,7 +1318,9 @@ class RemoteViewerApp(App):
                 except (ConnectionResetError, BrokenPipeError): break
                 except Exception as e: print(f"[!] Erreur inattendue dans receive_frames: {e}"); break
             if self.remote_widget.client_socket:
-                self.remote_widget.client_socket.close(); self.remote_widget.client_socket = None
+                self.remote_widget.client_socket.close()
+                self.remote_widget.client_socket = None
+                self.remote_camera_widget.client_socket = None
             Clock.schedule_once(self.switch_to_connect_screen)
 
     def update_available_cameras(self, camera_indices):
@@ -1340,7 +1355,8 @@ class RemoteViewerApp(App):
     def switch_to_connect_screen(self, dt):
         self.remote_widget.release_keyboard()
         self.clipboard_stop_event.set()
-        self.stop_camera_stream() # Arrêter le streaming caméra à la déconnexion
+        if self.sm.current == 'remote': # Only stop streams if we are on the remote screen
+            self.stop_camera_stream() # Arrêter le streaming caméra à la déconnexion
         self.status_label.text = "Déconnecté."; self.sm.current = 'connect'
     def show_connection_error(self, error_msg): self.status_label.text = f"Échec: {error_msg}"
 
