@@ -31,15 +31,30 @@ from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.slider import Slider
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
-from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty
+from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty, NumericProperty
 from os.path import expanduser
 import pyperclip
 import pythoncom
+from kivy.uix.spinner import Spinner # Import Spinner
 
 # --- NOUVEAU : Design amélioré avec KV String ---
 Builder.load_string('''
 #:import get_color_from_hex kivy.utils.get_color_from_hex
 #:import RoundedRectangle kivy.graphics.RoundedRectangle
+
+<SpinnerOption@SpinnerOption>: # Custom styling for spinner options
+    background_color: get_color_from_hex('#2C2F33')
+    color: get_color_from_hex('#FFFFFF')
+    # selected_color: get_color_from_hex('#5865F2') # Cette propriété n'est pas directement utilisée ici
+    background_normal: '' # Assurez-vous que ces propriétés sont vides pour que canvas.before prenne le dessus
+    background_down: ''
+    # background_selected: '' # Ceci est pour le Spinner lui-même, pas ses options
+    canvas.before:
+        Color:
+            rgba: self.background_color # Utilise simplement la couleur de fond définie
+        Rectangle:
+            pos: self.pos
+            size: self.size
 
 <FileEntryWidget>:
     orientation: 'horizontal'
@@ -184,7 +199,7 @@ Builder.load_string('''
                         radius: [dp(8),]
                 TextInput:
                     id: port_input
-                    hint_text: 'Port (ex: 2000)'
+                    hint_text: 'Port (ex: 1981)'
                     multiline: False
                     background_color: 0,0,0,0
                     foreground_color: get_color_from_hex('#FFFFFF')
@@ -277,6 +292,7 @@ Builder.load_string('''
 # --- CORRECTION : Remise en place des variables globales ---
 MSG_TYPE_IMAGE = b'\x01'
 MSG_TYPE_COMMAND = b'\x02'
+MSG_TYPE_CAMERA = b'\x03' # Nouveau type de message pour la caméra
 
 class ColorProgressBar(ProgressBar):
     bar_color = ColorProperty([0.2, 0.6, 0.8, 1])
@@ -374,6 +390,20 @@ class RemoteDesktopWidget(Image):
                 self.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
             except (BrokenPipeError, ConnectionResetError): pass
 
+class RemoteCameraWidget(Image):
+    def __init__(self, **kwargs):
+        super(RemoteCameraWidget, self).__init__(**kwargs)
+        self.client_socket = None
+        self.camera_resolution = (1, 1)
+
+    def send_command(self, command_str):
+        if self.client_socket:
+            try:
+                command_bytes = command_str.encode('utf-8')
+                len_info = struct.pack("!H", len(command_bytes))
+                self.client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
+            except (BrokenPipeError, ConnectionResetError): pass
+
 class FileEntryWidget(BoxLayout):
     name = StringProperty('')
     file_size = StringProperty('')
@@ -397,6 +427,9 @@ class RemoteScreen(Screen):
     pass
 
 class RemoteViewerApp(App):
+    available_cameras = ListProperty([]) # New property to store available camera indices
+    selected_camera_index = NumericProperty(0) # New property for the currently selected camera
+
     def build(self):
         self.sm = ScreenManager()
         self.sys_info_update_event = None
@@ -407,6 +440,7 @@ class RemoteViewerApp(App):
         self.last_clipboard_content = ""
         self.last_clipboard_content_from_server = ""
         self.chat_history_messages = []
+        self.is_camera_streaming = False # Nouveau flag pour l'état du streaming caméra
 
         connect_screen = ConnectScreen(name='connect')
         self.ip_input = connect_screen.ids.ip_input
@@ -421,6 +455,39 @@ class RemoteViewerApp(App):
         self.remote_widget = RemoteDesktopWidget()
         self.desktop_tab.add_widget(self.remote_widget)
         self.tab_panel.add_widget(self.desktop_tab)
+
+        # --- Onglet Caméra ---
+        self.camera_tab = TabbedPanelItem(text='Caméra')
+        camera_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # NEW: Camera selection Spinner
+        camera_selector_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
+        camera_selector_layout.add_widget(Label(text="Sélectionner la caméra:", size_hint_x=None, width=dp(150), color=get_color_from_hex('#FFFFFF')))
+        self.camera_selector = Spinner(
+            text="Caméra 0", # Default text
+            values=[], # Will be populated dynamically
+            size_hint_x=None,
+            width=dp(150),
+            background_color=get_color_from_hex('#23272A'),
+            color=get_color_from_hex('#FFFFFF'),
+            option_cls='SpinnerOption'
+        )
+        self.camera_selector.bind(text=self.on_camera_selection_text) # Bind to a new handler
+        camera_selector_layout.add_widget(self.camera_selector)
+        camera_layout.add_widget(camera_selector_layout)
+
+        self.remote_camera_widget = RemoteCameraWidget(allow_stretch=True, keep_ratio=True)
+        camera_layout.add_widget(self.remote_camera_widget)
+
+        camera_controls = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        self.start_camera_button = Button(text='Démarrer Caméra', on_press=self.start_camera_stream)
+        self.stop_camera_button = Button(text='Arrêter Caméra', on_press=self.stop_camera_stream, disabled=True)
+        camera_controls.add_widget(self.start_camera_button)
+        camera_controls.add_widget(self.stop_camera_button)
+        camera_layout.add_widget(camera_controls)
+
+        self.camera_tab.add_widget(camera_layout)
+        self.tab_panel.add_widget(self.camera_tab)
 
         # --- Onglet Infos Système (Design Compact) ---
         self.sys_info_tab = TabbedPanelItem(text='Infos Système')
@@ -628,7 +695,7 @@ class RemoteViewerApp(App):
         chat_input_layout.add_widget(self.chat_input)
         chat_input_layout.add_widget(send_button)
         chat_layout.add_widget(chat_scroll_view)
-        chat_layout.add_widget(chat_input_layout)
+        chat_layout.add_widget(chat_input_layout) # Removed the duplicate line here
         self.chat_tab.add_widget(chat_layout)
         self.tab_panel.add_widget(self.chat_tab)
 
@@ -645,7 +712,7 @@ class RemoteViewerApp(App):
         logo = Image(source='logo.ico', size_hint_y=None, height=dp(80), allow_stretch=True)
         title_label = Label(text='[b]Hosanna Remote Viewer[/b]', markup=True, font_size='24sp', size_hint_y=None, height=dp(40), color=get_color_from_hex('#FFFFFF'))
         version_label = Label(text='Version 1.0.0', font_size='14sp', size_hint_y=None, height=dp(20), color=get_color_from_hex('#99AAB5'))
-        
+
         title_card.add_widget(logo)
         title_card.add_widget(title_label)
         title_card.add_widget(version_label)
@@ -660,12 +727,12 @@ class RemoteViewerApp(App):
         info_card.bind(pos=lambda i, v: setattr(info_card.rect, 'pos', v), size=lambda i, v: setattr(info_card.rect, 'size', v))
 
         info_card.add_widget(Label(text='[b]Développé par :[/b] Chadrack Mbu Jess', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
-        info_card.add_widget(Label(text='© 2025', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
-        
+        info_card.add_widget(Label(text='© 2025', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#99AAB5')))
+
         desc_title = Label(text='[b]Description :[/b]', markup=True, font_size='16sp', size_hint_y=None, height=dp(40), color=get_color_from_hex('#FFFFFF'), halign='left')
         desc_title.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
         info_card.add_widget(desc_title)
-        
+
         description = Label(
             text='Une application de bureau à distance sécurisée et performante, conçue pour offrir un contrôle fluide et un accès facile à vos fichiers et informations système.',
             font_size='14sp',
@@ -758,10 +825,64 @@ class RemoteViewerApp(App):
         return section
 
     def on_tab_switch(self, instance, value):
-        if value == self.desktop_tab: self.remote_widget.setup_keyboard()
-        else: self.remote_widget.release_keyboard()
+        if value == self.desktop_tab:
+            self.remote_widget.setup_keyboard()
+            self.stop_camera_stream() # Arrêter le flux caméra si on quitte l'onglet caméra
+        else:
+            self.remote_widget.release_keyboard()
+
+        if value == self.camera_tab:
+            # On ne démarre pas automatiquement, l'utilisateur doit cliquer sur le bouton
+            pass
+        else:
+            self.stop_camera_stream() # Arrêter le flux caméra si on quitte l'onglet caméra
+
         if value == self.sys_info_tab: self.start_sys_info_updates()
         else: self.stop_sys_info_updates()
+
+    def on_camera_selection_text(self, spinner, text):
+        # This method is called when the spinner's text changes (i.e., a new camera is selected)
+        try:
+            # Extract the index from the text, e.g., "Caméra 0" -> 0
+            index = int(text.split(' ')[1])
+            self.select_camera(index)
+        except (ValueError, IndexError):
+            print(f"Invalid camera selection text: {text}")
+
+    def select_camera(self, index):
+        if self.selected_camera_index != index:
+            self.selected_camera_index = index
+            print(f"Client selected camera index: {index}")
+            # Send command to server to switch camera
+            if self.remote_widget.client_socket:
+                self.remote_widget.send_command(f"SELECT_CAMERA,{index}")
+            # If camera is currently streaming, restart it with the new selection
+            if self.is_camera_streaming:
+                self.stop_camera_stream() # Stop current stream
+                self.start_camera_stream(None) # Start new stream with selected camera
+
+    def start_camera_stream(self, instance):
+        if not self.is_camera_streaming and self.selected_camera_index != -1:
+            self.remote_camera_widget.send_command("START_CAMERA")
+            # Also send the current selected camera index to ensure the server is streaming the right one
+            self.remote_camera_widget.send_command(f"SELECT_CAMERA,{self.selected_camera_index}")
+            self.is_camera_streaming = True
+            self.start_camera_button.disabled = True
+            self.stop_camera_button.disabled = False
+            # Optionnel: arrêter le streaming écran si la caméra est activée
+            self.remote_widget.send_command("STOP_SCREEN")
+        elif self.selected_camera_index == -1:
+            print("[!] Impossible de démarrer le streaming: aucune caméra disponible.")
+
+    def stop_camera_stream(self, instance=None): # instance=None pour pouvoir l'appeler sans événement de bouton
+        if self.is_camera_streaming:
+            self.remote_camera_widget.send_command("STOP_CAMERA")
+            self.is_camera_streaming = False
+            self.start_camera_button.disabled = False
+            self.stop_camera_button.disabled = True
+            self.remote_camera_widget.texture = None # Effacer l'image de la caméra
+            # Optionnel: redémarrer le streaming écran si la caméra est désactivée
+            self.remote_widget.send_command("START_SCREEN")
 
     def start_sys_info_updates(self):
         if not self.sys_info_update_event:
@@ -1002,7 +1123,9 @@ class RemoteViewerApp(App):
             Clock.schedule_once(lambda dt: setattr(self.cancel_button, 'disabled', True))
             self.cancel_transfer_flag.clear()
 
-    def send_quality_setting(self, quality_value): self.remote_widget.send_command(f"QUALITY,{quality_value}")
+    def send_quality_setting(self, quality_value):
+        if self.remote_widget.client_socket:
+            self.remote_widget.send_command(f"QUALITY,{quality_value}")
 
     def send_clipboard_to_server(self, content):
         if self.remote_widget.client_socket:
@@ -1103,6 +1226,7 @@ class RemoteViewerApp(App):
             client_socket.connect((host, port))
             client_socket.settimeout(None)
             self.remote_widget.client_socket = client_socket
+            self.remote_camera_widget.client_socket = client_socket # Assigner le socket à RemoteCameraWidget
             self.send_quality_setting(70)
             Clock.schedule_once(self.switch_to_remote_screen)
             self.clipboard_stop_event.clear()
@@ -1129,6 +1253,15 @@ class RemoteViewerApp(App):
                         width, height = struct.unpack("!II", payload[:struct.calcsize("!II")])
                         self.remote_widget.server_resolution = (width, height)
                         Clock.schedule_once(lambda dt, data=payload[struct.calcsize("!II"):]: self.update_image(data))
+                    elif msg_type_byte == MSG_TYPE_CAMERA: # Gérer le flux de la caméra
+                        len_info = self.recv_all(self.remote_camera_widget.client_socket, 4)
+                        if not len_info: break
+                        payload_size = struct.unpack("!I", len_info)[0]
+                        payload = self.recv_all(self.remote_camera_widget.client_socket, payload_size)
+                        if not payload: break
+                        width, height = struct.unpack("!II", payload[:struct.calcsize("!II")])
+                        self.remote_camera_widget.camera_resolution = (width, height)
+                        Clock.schedule_once(lambda dt, data=payload[struct.calcsize("!II"):]: self.update_camera_feed(data))
                     elif msg_type_byte == MSG_TYPE_COMMAND:
                         len_info = self.recv_all(self.remote_widget.client_socket, 2)
                         if not len_info: break
@@ -1149,6 +1282,12 @@ class RemoteViewerApp(App):
                         elif cmd_type == 'CHAT_MESSAGE_FROM_SERVER':
                             message = value_str
                             self.add_message_to_chat_history(f"[b][color=00FF00]Serveur:[/color][/b] {message}")
+                        elif cmd_type == 'CAMERA_LIST': # NEW: Handle CAMERA_LIST command
+                            try:
+                                camera_indices = json.loads(value_str)
+                                Clock.schedule_once(lambda dt: self.update_available_cameras(camera_indices))
+                            except json.JSONDecodeError as e:
+                                print(f"[!] Erreur de décodage de la liste des caméras: {e}")
                         else: pass
                     else: break
                 except (ConnectionResetError, BrokenPipeError): break
@@ -1157,14 +1296,39 @@ class RemoteViewerApp(App):
                 self.remote_widget.client_socket.close(); self.remote_widget.client_socket = None
             Clock.schedule_once(self.switch_to_connect_screen)
 
+    def update_available_cameras(self, camera_indices):
+        self.available_cameras = [f"Caméra {i}" for i in camera_indices]
+        if self.available_cameras:
+            # Set the spinner values
+            self.camera_selector.values = self.available_cameras
+            # Set default selection to the first available camera if not already set
+            if not self.camera_selector.text or self.camera_selector.text not in self.available_cameras:
+                self.camera_selector.text = self.available_cameras[0]
+                self.selected_camera_index = int(self.available_cameras[0].split(' ')[1])
+                # Send initial selection to server
+                if self.remote_widget.client_socket:
+                    self.remote_widget.send_command(f"SELECT_CAMERA,{self.selected_camera_index}")
+        else:
+            self.camera_selector.values = ["Aucune caméra"]
+            self.camera_selector.text = "Aucune caméra"
+            self.selected_camera_index = -1 # Indicate no camera selected
+            self.start_camera_button.disabled = True
+            self.stop_camera_button.disabled = True
+            print("[!] Aucune caméra détectée sur le serveur.")
+
     def switch_to_remote_screen(self, dt):
         self.sm.current = 'remote'
         self.remote_widget.setup_keyboard()
         self.list_remote_dir("")
+        # S'assurer que le streaming caméra est arrêté par défaut
+        self.stop_camera_stream()
+        # The camera list will be received and updated by the receive_frames loop.
+        # No need to explicitly call update_available_cameras here.
 
     def switch_to_connect_screen(self, dt):
         self.remote_widget.release_keyboard()
         self.clipboard_stop_event.set()
+        self.stop_camera_stream() # Arrêter le streaming caméra à la déconnexion
         self.status_label.text = "Déconnecté."; self.sm.current = 'connect'
     def show_connection_error(self, error_msg): self.status_label.text = f"Échec: {error_msg}"
 
@@ -1186,6 +1350,14 @@ class RemoteViewerApp(App):
             self.remote_widget.texture = core_image.texture
         except Exception as e:
             print(f"[!] Erreur de décodage d'image (trame ignorée): {e}")
+
+    def update_camera_feed(self, jpeg_bytes):
+        try:
+            buf = io.BytesIO(jpeg_bytes)
+            core_image = CoreImage(buf, ext='jpg')
+            self.remote_camera_widget.texture = core_image.texture
+        except Exception as e:
+            print(f"[!] Erreur de décodage de flux caméra (trame ignorée): {e}")
 
 if __name__ == '__main__':
     RemoteViewerApp().run()

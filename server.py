@@ -18,6 +18,7 @@ from pynput.keyboard import Key, Controller as KeyboardController
 import pyperclip
 import tkinter as tk
 from tkinter import scrolledtext
+import cv2 # Importation d'OpenCV
 
 # --- Fonction pour trouver les ressources (pour PyInstaller) ---
 def resource_path(relative_path):
@@ -107,6 +108,7 @@ def recv_all(sock, n):
 
 MSG_TYPE_IMAGE = b'\x01'
 MSG_TYPE_COMMAND = b'\x02'
+MSG_TYPE_CAMERA = b'\x03' # Nouveau type de message pour la caméra
 active_chat_windows = {}
 
 def send_chat_message_to_client(client_socket, message):
@@ -117,6 +119,8 @@ def send_chat_message_to_client(client_socket, message):
         client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
     except (BrokenPipeError, ConnectionResetError):
         print("[!] Client déconnecté lors de l'envoi du message chat.")
+    except ssl.SSLError as e: # Catch specific SSL errors
+        print(f"[!] Erreur SSL lors de l'envoi du message chat au client: {e}")
     except Exception as e:
         print(f"[!] Erreur lors de l'envoi du message chat au client: {e}")
 
@@ -168,7 +172,7 @@ class ServerChatWindow:
     def _create_gui(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
-        
+
         window_width = 1000
         window_height = 800
         screen_width = self.root.winfo_screenwidth()
@@ -176,15 +180,15 @@ class ServerChatWindow:
         center_x = int(screen_width/2 - window_width / 2)
         center_y = int(screen_height/2 - window_height / 2)
         self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
-        
+
         self.root.attributes("-topmost", True)
-        
+
         main_frame = tk.Frame(self.root, highlightbackground="gray", highlightcolor="gray", highlightthickness=1)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         title_bar = tk.Frame(main_frame, bg='gray', relief='raised', bd=0)
         title_bar.pack(expand=False, fill='x')
-        
+
         title_label = tk.Label(title_bar, text=f"Chat avec {self.client_address[0]}", bg='gray', fg='white')
         title_label.pack(side=tk.LEFT, padx=10)
 
@@ -289,6 +293,9 @@ def stream_frames(client_socket, stop_event, session_settings):
         with mss.mss() as sct:
             monitor = sct.monitors[1]
             while not stop_event.is_set():
+                if not session_settings['screen_streaming_active']:
+                    time.sleep(0.1) # Éviter de boucler trop vite si le streaming est désactivé
+                    continue
                 sct_img = sct.grab(monitor)
                 header = struct.pack("!II", sct_img.width, sct_img.height)
                 img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
@@ -305,11 +312,117 @@ def stream_frames(client_socket, stop_event, session_settings):
     finally:
         stop_event.set()
 
+def get_available_cameras():
+    """
+    Détecte les caméras disponibles sur le système et retourne une liste de leurs indices.
+    """
+    available_cameras = []
+    # Essayer jusqu'à un certain nombre de caméras (par exemple, 10)
+    for i in range(10):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW) # Utiliser CAP_DSHOW pour Windows pour une meilleure compatibilité
+        if cap.isOpened():
+            # Tenter de lire une trame pour s'assurer que la caméra est fonctionnelle
+            ret, frame = cap.read()
+            if ret:
+                available_cameras.append(i)
+            cap.release()
+        else:
+            # Si une caméra n'est pas trouvée, il est probable que les suivantes ne le soient pas non plus
+            # ou qu'il y ait un trou dans les indices. On peut ajuster cette logique si nécessaire.
+            pass
+    return available_cameras
+
+def stream_camera_frames(client_socket, stop_event, session_settings, camera_index_ref):
+    cap = None
+    current_camera_index = -1 # Track the camera index currently in use by this thread
+    try:
+        while not stop_event.is_set():
+            # Get the current selected camera index from the shared session settings
+            selected_camera_index = camera_index_ref[0]
+
+            # Check if the camera index has changed or if streaming needs to start/stop
+            if session_settings['camera_streaming_active'] and current_camera_index != selected_camera_index:
+                if cap:
+                    cap.release()
+                    cap = None
+                current_camera_index = selected_camera_index
+                print(f"[*] Initialisation de la caméra {current_camera_index} pour le streaming.")
+                cap = cv2.VideoCapture(current_camera_index, cv2.CAP_DSHOW)
+                if not cap.isOpened():
+                    print(f"[!] Erreur: Impossible d'ouvrir la caméra {current_camera_index}. Le streaming de cette caméra est désactivé.")
+                    if cap: cap.release()
+                    cap = None
+                    current_camera_index = -1 # Mark as failed
+                    time.sleep(1) # Wait a bit before retrying or checking for new settings
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            elif not session_settings['camera_streaming_active'] and cap:
+                # If streaming is deactivated, release the camera
+                cap.release()
+                cap = None
+                current_camera_index = -1
+                time.sleep(0.1)
+                continue
+            elif not session_settings['camera_streaming_active'] and not cap:
+                # If streaming is deactivated and camera is already released, just wait
+                time.sleep(0.1)
+                continue
+
+            if cap and session_settings['camera_streaming_active']:
+                ret, frame = cap.read()
+                if not ret:
+                    print(f"[!] Erreur: Impossible de lire la trame de la caméra {current_camera_index}. Tentative de réinitialisation.")
+                    if cap: cap.release()
+                    cap = None
+                    current_camera_index = -1 # Force re-initialization
+                    time.sleep(1)
+                    continue
+
+                _, jpeg_bytes = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), session_settings['jpeg_quality']])
+                width = frame.shape[1]
+                height = frame.shape[0]
+                header = struct.pack("!II", width, height)
+                payload = header + jpeg_bytes.tobytes()
+                len_info = struct.pack("!I", len(payload))
+                client_socket.sendall(MSG_TYPE_CAMERA + len_info + payload)
+                time.sleep(0.05)
+            else:
+                time.sleep(0.1) # Wait if no camera is active or selected
+
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    except Exception as e:
+        print(f"[!] Erreur dans stream_camera_frames: {e}")
+    finally:
+        if cap:
+            cap.release()
+        stop_event.set()
+
+
 def handle_client(client_socket, client_address):
     stop_event = threading.Event()
-    session_settings = {'jpeg_quality': 70}
+    session_settings = {
+        'jpeg_quality': 70,
+        'screen_streaming_active': True,
+        'camera_streaming_active': False,
+        'selected_camera_index': [0] # Default to camera 0, using a list to make it mutable across threads
+    }
     session_data = {'jpeg_quality': 70, 'last_server_clipboard': "", 'last_client_clipboard_received': "", 'last_clipboard_sent_to_client': ""}
     server_chat_window = None
+
+    # Send available cameras to the client upon connection
+    available_cams = get_available_cameras()
+    camera_list_str = json.dumps(available_cams)
+    command_str = f"CAMERA_LIST,{camera_list_str}"
+    command_bytes = command_str.encode('utf-8')
+    len_info = struct.pack("!H", len(command_bytes))
+    try:
+        client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
+    except (BrokenPipeError, ConnectionResetError):
+        print(f"[!] Client {client_address} déconnecté lors de l'envoi de la liste des caméras.")
+        stop_event.set()
+        return
 
     def _notify_chat_window_closed(address):
         nonlocal server_chat_window
@@ -322,8 +435,35 @@ def handle_client(client_socket, client_address):
     clipboard_monitor = threading.Thread(target=monitor_and_sync_clipboard, args=(client_socket, stop_event, session_data), daemon=True)
     clipboard_monitor.start()
 
+    # Initialize camera_streamer outside the loop so it can be restarted if camera_index changes
+    camera_streamer_thread = None
+    camera_streamer_stop_event = threading.Event() # A separate stop event for the camera streamer
+
+    def start_camera_streamer():
+        nonlocal camera_streamer_thread, camera_streamer_stop_event
+        # Stop the existing camera streamer if it's running
+        if camera_streamer_thread and camera_streamer_thread.is_alive():
+            camera_streamer_stop_event.set()
+            camera_streamer_thread.join(timeout=1) # Wait for it to stop
+            if camera_streamer_thread.is_alive():
+                print("[!] Avertissement: Le thread de la caméra n'a pas pu s'arrêter à temps.")
+        
+        # Create a new stop event for the new thread
+        camera_streamer_stop_event = threading.Event()
+        camera_streamer_thread = threading.Thread(
+            target=stream_camera_frames,
+            args=(client_socket, camera_streamer_stop_event, session_settings, session_settings['selected_camera_index']),
+            daemon=True
+        )
+        camera_streamer_thread.start()
+        print(f"[*] Thread de streaming caméra démarré pour la caméra {session_settings['selected_camera_index'][0]}.")
+
+    # Start the camera streamer initially with the default camera
+    start_camera_streamer()
+
+
     def _receive_and_process_client_messages():
-        nonlocal server_chat_window
+        nonlocal server_chat_window, camera_streamer_thread, camera_streamer_stop_event
         try:
             while not stop_event.is_set():
                 msg_type_byte = recv_all(client_socket, 1)
@@ -372,19 +512,44 @@ def handle_client(client_socket, client_address):
                             server_chat_window.add_message("Client", value_str)
                         else:
                             server_chat_window.add_message("Client", value_str)
+                    elif cmd_type == 'START_CAMERA':
+                        session_settings['camera_streaming_active'] = True
+                        print(f"[*] Démarrage du streaming caméra pour {client_address}")
+                    elif cmd_type == 'STOP_CAMERA':
+                        session_settings['camera_streaming_active'] = False
+                        print(f"[*] Arrêt du streaming caméra pour {client_address}")
+                    elif cmd_type == 'SELECT_CAMERA':
+                        try:
+                            new_camera_index = int(value_str)
+                            if new_camera_index != session_settings['selected_camera_index'][0]:
+                                session_settings['selected_camera_index'][0] = new_camera_index
+                                print(f"[*] Client {client_address} a sélectionné la caméra {new_camera_index}.")
+                                # Restart the camera streamer with the new index
+                                start_camera_streamer()
+                            else:
+                                print(f"[*] Caméra {new_camera_index} déjà sélectionnée pour {client_address}.")
+                        except ValueError:
+                            print(f"[!] Commande SELECT_CAMERA invalide: {value_str}")
+                    elif cmd_type == 'START_SCREEN':
+                        session_settings['screen_streaming_active'] = True
+                        print(f"[*] Démarrage du streaming écran pour {client_address}")
+                    elif cmd_type == 'STOP_SCREEN':
+                        session_settings['screen_streaming_active'] = False
+                        print(f"[*] Arrêt du streaming écran pour {client_address}")
                     else:
                         pass
-                elif msg_type_byte == MSG_TYPE_IMAGE:
+                elif msg_type_byte == MSG_TYPE_IMAGE or msg_type_byte == MSG_TYPE_CAMERA: # Gérer les messages image/caméra si le client en envoie (peu probable ici)
                     len_info = recv_all(client_socket, 4)
                     if len_info:
                         payload_size = struct.unpack("!I", len_info)[0]
-                        recv_all(client_socket, payload_size)
+                        recv_all(client_socket, payload_size) # Lire et ignorer le payload
                     else:
                         break
                 else:
                     break
         finally:
             stop_event.set()
+            camera_streamer_stop_event.set() # Ensure camera streamer also stops
             if server_chat_window:
                 server_chat_window.add_message("Système", "Client déconnecté.")
                 server_chat_window.close_window_from_other_thread()
@@ -393,8 +558,11 @@ def handle_client(client_socket, client_address):
 
     receiver = threading.Thread(target=_receive_and_process_client_messages, daemon=True)
     streamer = threading.Thread(target=stream_frames, args=(client_socket, stop_event, session_settings), daemon=True)
+
     receiver.start()
     streamer.start()
+    # camera_streamer is started by start_camera_streamer()
+
     stop_event.wait()
     print(f"[-] Client {client_address} déconnecté.")
     client_socket.close()

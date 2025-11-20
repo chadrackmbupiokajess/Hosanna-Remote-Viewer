@@ -1,70 +1,45 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from kivy.tools.packaging.pyinstaller_hooks import get_hooks
 
 a = Analysis(
     ['client.py'],
-    pathex=['C:/Users/chadr/Videos/Projet/Brouillon/Hosanna Remote Viewer'],
+    pathex=[],
     binaries=[],
-    datas=[
-        ('cert.pem', '.'),
-        ('logo.ico', '.'),
-        ('seguisym.ttf', '.')
-    ],
-    hiddenimports=[
-        'kivy.core.text.markup',
-        'kivy.core.image.img_pil', 
-        'kivy.core.image.img_ffpyplayer',
-        'kivy.lib.ddsfile',
-        'kivy.lib.osc',
-        'kivy.lib.mtdev',
-        'kivy.lib.gstplayer',
-        'kivy.garden.iconfonts',
-        'pyperclip',
-        'win32timezone'
-    ],
-    hookspath=get_hooks()['hookspath'],
-    runtime_hooks=get_hooks()['runtime_hooks'],
+    datas=[('cert.pem', '.'), ('logo.ico', '.'), ('seguisym.ttf', '.')],
+    hiddenimports=['pyperclip', 'win32timezone'],
+    hookspath=[],
     hooksconfig={},
+    runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=None,
-    noarchive=False
+    noarchive=False,
+    optimize=0,
 )
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=None)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='HosannaClient',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # Masque la console
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='logo.ico'  # Définit l'icône de l'exécutable
+    icon=['logo.ico'],
 )
-
 coll = COLLECT(
     exe,
     a.binaries,
-    a.zipfiles,
     a.datas,
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='HosannaClient'
+    name='HosannaClient',
 )
