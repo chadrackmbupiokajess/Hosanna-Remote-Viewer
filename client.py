@@ -44,7 +44,7 @@ from kivy.resources import resource_add_path
 if hasattr(sys, '_MEIPASS'):
     resource_add_path(os.path.join(sys._MEIPASS))
 else:
-    # If running from source, add the script's directory
+    # Ifs running from source, add the script's directory
     resource_add_path(os.path.dirname(os.path.abspath(__file__)))
 
 
