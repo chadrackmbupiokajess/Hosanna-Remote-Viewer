@@ -31,6 +31,7 @@ from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.slider import Slider
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.popup import Popup
 from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty, NumericProperty
 from os.path import expanduser
 import pyperclip
@@ -55,13 +56,11 @@ Builder.load_string('''
 <SpinnerOption@SpinnerOption>: # Custom styling for spinner options
     background_color: get_color_from_hex('#2C2F33')
     color: get_color_from_hex('#FFFFFF')
-    # selected_color: get_color_from_hex('#5865F2') # This property is not used directly here
-    background_normal: '' # Ensure these properties are empty for canvas.before to take over
+    background_normal: ''
     background_down: ''
-    # background_selected: '' # This is for the Spinner itself, not its options
     canvas.before:
         Color:
-            rgba: self.background_color # Just use the defined background color
+            rgba: self.background_color
         Rectangle:
             pos: self.pos
             size: self.size
@@ -112,7 +111,7 @@ Builder.load_string('''
 <ColorProgressBar>:
     canvas:
         Color:
-            rgba: 0.2, 0.2, 0.2, 1 # Background color
+            rgba: 0.2, 0.2, 0.2, 1
         BorderImage:
             border: (12, 12, 12, 12)
             pos: self.x, self.center_y - 12
@@ -129,7 +128,7 @@ Builder.load_string('''
 <ConnectScreen>:
     canvas.before:
         Color:
-            rgba: get_color_from_hex('#1A1A1A') # Dark background
+            rgba: get_color_from_hex('#1A1A1A')
         Rectangle:
             pos: self.pos
             size: self.size
@@ -140,10 +139,10 @@ Builder.load_string('''
         size: dp(400), dp(550)
         pos_hint: {'center_x': 0.5, 'center_y': 0.5}
         padding: dp(30)
-        spacing: dp(25)
+        spacing: dp(15)
         canvas.before:
             Color:
-                rgba: get_color_from_hex('#2C2F33') # Card background
+                rgba: get_color_from_hex('#2C2F33')
             RoundedRectangle:
                 pos: self.pos
                 size: self.size
@@ -152,8 +151,9 @@ Builder.load_string('''
         Image:
             source: 'logo.ico'
             size_hint_y: None
-            height: dp(100)
+            height: dp(80)
             allow_stretch: True
+            padding: dp(10)
 
         Label:
             text: 'Hosanna Remote'
@@ -169,54 +169,118 @@ Builder.load_string('''
             size_hint_y: None
             height: self.texture_size[1]
             color: get_color_from_hex('#99AAB5')
-            padding_y: dp(10)
+            padding: 0, dp(10)
 
-        GridLayout:
-            cols: 1
-            spacing: dp(20)
-            size_hint_y: None
-            height: self.minimum_height
+        TabbedPanel:
+            id: connection_tabs
+            do_default_tab: False
+            tab_pos: 'top_mid'
+            tab_width: self.width / 2
+            background_color: get_color_from_hex('#2C2F33')
 
-            BoxLayout:
-                size_hint_y: None
-                height: dp(50)
-                canvas.before:
-                    Color:
-                        rgba: get_color_from_hex('#23272A')
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.size
-                        radius: [dp(8),]
-                TextInput:
-                    id: ip_input
-                    hint_text: 'Adresse IP du serveur'
-                    multiline: False
-                    background_color: 0,0,0,0
-                    foreground_color: get_color_from_hex('#FFFFFF')
-                    hint_text_color: get_color_from_hex('#99AAB5')
-                    font_size: '15sp'
-                    padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
+            TabbedPanelItem:
+                text: 'Connexion Locale'
+                id: local_tab
+                font_size: '14sp'
+                background_color: get_color_from_hex('#23272A')
+                
+                GridLayout:
+                    cols: 1
+                    spacing: dp(15)
+                    padding: dp(20)
+                    
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        canvas.before:
+                            Color:
+                                rgba: get_color_from_hex('#23272A')
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.size
+                                radius: [dp(8),]
+                        TextInput:
+                            id: ip_input
+                            hint_text: 'Adresse IP du serveur'
+                            multiline: False
+                            background_color: 0,0,0,0
+                            foreground_color: get_color_from_hex('#FFFFFF')
+                            hint_text_color: get_color_from_hex('#99AAB5')
+                            font_size: '15sp'
+                            padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
 
-            BoxLayout:
-                size_hint_y: None
-                height: dp(50)
-                canvas.before:
-                    Color:
-                        rgba: get_color_from_hex('#23272A')
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.size
-                        radius: [dp(8),]
-                TextInput:
-                    id: port_input
-                    hint_text: 'Port (ex: 5000)'
-                    multiline: False
-                    background_color: 0,0,0,0
-                    foreground_color: get_color_from_hex('#FFFFFF')
-                    hint_text_color: get_color_from_hex('#99AAB5')
-                    font_size: '15sp'
-                    padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        canvas.before:
+                            Color:
+                                rgba: get_color_from_hex('#23272A')
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.size
+                                radius: [dp(8),]
+                        TextInput:
+                            id: port_input
+                            hint_text: 'Port (ex: 5000)'
+                            text: '1981'
+                            multiline: False
+                            background_color: 0,0,0,0
+                            foreground_color: get_color_from_hex('#FFFFFF')
+                            hint_text_color: get_color_from_hex('#99AAB5')
+                            font_size: '15sp'
+                            padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
 
+            TabbedPanelItem:
+                text: 'Connexion Distante'
+                id: remote_tab
+                font_size: '14sp'
+                background_color: get_color_from_hex('#23272A')
+
+                GridLayout:
+                    cols: 1
+                    spacing: dp(15)
+                    padding: dp(20)
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        canvas.before:
+                            Color:
+                                rgba: get_color_from_hex('#23272A')
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.size
+                                radius: [dp(8),]
+                        TextInput:
+                            id: remote_address_input
+                            hint_text: 'Adresse publique'
+                            multiline: False
+                            background_color: 0,0,0,0
+                            foreground_color: get_color_from_hex('#FFFFFF')
+                            hint_text_color: get_color_from_hex('#99AAB5')
+                            font_size: '15sp'
+                            padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
+                    
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        canvas.before:
+                            Color:
+                                rgba: get_color_from_hex('#23272A')
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.size
+                                radius: [dp(8),]
+                        TextInput:
+                            id: remote_port_input
+                            hint_text: 'Port public'
+                            multiline: False
+                            background_color: 0,0,0,0
+                            foreground_color: get_color_from_hex('#FFFFFF')
+                            hint_text_color: get_color_from_hex('#99AAB5')
+                            font_size: '15sp'
+                            padding: [dp(15), (self.height - self.line_height) / 2, dp(15), (self.height - self.line_height) / 2]
+        
         BoxLayout:
             size_hint_y: None
             height: dp(50)
@@ -243,7 +307,7 @@ Builder.load_string('''
                 background_color: 0,0,0,0
                 canvas.before:
                     Color:
-                        rgba: get_color_from_hex('#5865F2') # Accent color
+                        rgba: get_color_from_hex('#5865F2')
                     RoundedRectangle:
                         pos: self.pos
                         size: self.size
@@ -437,8 +501,8 @@ class RemoteScreen(Screen):
     pass
 
 class RemoteViewerApp(App):
-    available_cameras = ListProperty([]) # New property to store available camera indices
-    selected_camera_index = NumericProperty(0) # New property for the currently selected camera
+    available_cameras = ListProperty([])
+    selected_camera_index = NumericProperty(0)
 
     def build(self):
         self.title = 'HosannaRemote'
@@ -452,16 +516,23 @@ class RemoteViewerApp(App):
         self.last_clipboard_content = ""
         self.last_clipboard_content_from_server = ""
         self.chat_history_messages = []
-        self.is_camera_streaming = False # Nouveau flag pour l'état du streaming caméra
+        self.is_camera_streaming = False
+        self.main_server_address = None # (host, port) for main connection
+        self.file_server_address = None # (host, port) for file transfer connection
         
-        # Load the placeholder image texture once
         self.camera_placeholder_image = CoreImage('Hosanna Cameralogo.png')
 
         connect_screen = ConnectScreen(name='connect')
+        self.connection_tabs = connect_screen.ids.connection_tabs
+        self.local_tab = connect_screen.ids.local_tab
+        self.remote_tab = connect_screen.ids.remote_tab
         self.ip_input = connect_screen.ids.ip_input
         self.port_input = connect_screen.ids.port_input
-
+        self.remote_address_input = connect_screen.ids.remote_address_input
+        self.remote_port_input = connect_screen.ids.remote_port_input
         self.status_label = connect_screen.ids.status_label
+        
+        self.connection_tabs.default_tab = self.local_tab
 
         remote_screen = RemoteScreen(name='remote')
         self.tab_panel = TabbedPanel(do_default_tab=False)
@@ -472,30 +543,27 @@ class RemoteViewerApp(App):
         self.desktop_tab.add_widget(self.remote_widget)
         self.tab_panel.add_widget(self.desktop_tab)
 
-        # --- Onglet Caméra ---
         self.camera_tab = TabbedPanelItem(text='Caméra')
         camera_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
 
-        # NEW: Camera selection Spinner
         camera_selector_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
         camera_selector_layout.add_widget(Label(text="Sélectionner la caméra:", size_hint_x=None, width=dp(150), color=get_color_from_hex('#FFFFFF')))
         self.camera_selector = Spinner(
-            text="Caméra 0", # Default text
-            values=[], # Will be populated dynamically
+            text="Caméra 0",
+            values=[],
             size_hint_x=None,
             width=dp(150),
             background_color=get_color_from_hex('#23272A'),
             color=get_color_from_hex('#FFFFFF'),
             option_cls='SpinnerOption'
         )
-        self.camera_selector.bind(text=self.on_camera_selection_text) # Bind to a new handler
+        self.camera_selector.bind(text=self.on_camera_selection_text)
         camera_selector_layout.add_widget(self.camera_selector)
         camera_layout.add_widget(camera_selector_layout)
 
         self.remote_camera_widget = RemoteCameraWidget(
-            texture=self.camera_placeholder_image.texture, # Set initial texture
-            allow_stretch=True, 
-            keep_ratio=True
+            texture=self.camera_placeholder_image.texture,
+            fit_mode="contain"
         )
         camera_layout.add_widget(self.remote_camera_widget)
 
@@ -509,109 +577,59 @@ class RemoteViewerApp(App):
         self.camera_tab.add_widget(camera_layout)
         self.tab_panel.add_widget(self.camera_tab)
 
-        # --- Onglet Infos Système (Design Compact) ---
         self.sys_info_tab = TabbedPanelItem(text='Infos Système')
-
         sys_info_layout = BoxLayout(orientation='vertical', padding=[dp(20), dp(15), dp(20), dp(120)], spacing=dp(15))
-
         self.sys_info_labels = {}
         self.sys_info_widgets = {}
-
         info_card = self._create_info_card()
         info_card.size_hint_y = None
         info_card.height = dp(120)
         sys_info_layout.add_widget(info_card)
-
         resources_card, self.resources_layout = self._create_resources_card()
         sys_info_layout.add_widget(resources_card)
-
         self.sys_info_tab.add_widget(sys_info_layout)
         self.tab_panel.add_widget(self.sys_info_tab)
 
-        # --- Onglet Paramètres (Nouveau Design) ---
         settings_tab = TabbedPanelItem(text='Paramètres')
-
         root_layout = BoxLayout(padding=dp(30), orientation='vertical')
-
-        quality_card = BoxLayout(
-            orientation='vertical',
-            size_hint_y=None,
-            height=dp(180),
-            padding=dp(20),
-            spacing=dp(10)
-        )
-
+        quality_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(180), padding=dp(20), spacing=dp(10))
         with quality_card.canvas.before:
             Color(rgba=get_color_from_hex('#2C2F33'))
-            self.quality_card_rect = RoundedRectangle(
-                size=quality_card.size,
-                pos=quality_card.pos,
-                radius=[dp(15)]
-            )
-
-        quality_card.bind(
-            pos=lambda i, v: setattr(self.quality_card_rect, 'pos', v),
-            size=lambda i, v: setattr(self.quality_card_rect, 'size', v)
-        )
-
-        title_label = Label(
-            text='Qualité de l\'image', font_size='18sp', bold=True,
-            size_hint_y=None, height=dp(30), halign='left',
-            color=get_color_from_hex('#FFFFFF')
-        )
+            self.quality_card_rect = RoundedRectangle(size=quality_card.size, pos=quality_card.pos, radius=[dp(15)])
+        quality_card.bind(pos=lambda i, v: setattr(self.quality_card_rect, 'pos', v), size=lambda i, v: setattr(self.quality_card_rect, 'size', v))
+        title_label = Label(text='Qualité de l\'image', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), halign='left', color=get_color_from_hex('#FFFFFF'))
         title_label.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
         quality_card.add_widget(title_label)
-
-        description_label = Label(
-            text='Ajuste la qualité pour équilibrer performance et bande passante.',
-            font_size='12sp', size_hint_y=None, height=dp(20),
-            halign='left', color=get_color_from_hex('#99AAB5')
-        )
+        description_label = Label(text='Ajuste la qualité pour équilibrer performance et bande passante.', font_size='12sp', size_hint_y=None, height=dp(20), halign='left', color=get_color_from_hex('#99AAB5'))
         description_label.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
         quality_card.add_widget(description_label)
-
         slider_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
-
-        quality_slider = Slider(
-            min=10, max=95, value=70, step=5, value_track=True,
-            value_track_color=get_color_from_hex('#5865F2'),
-            cursor_size=(dp(20), dp(20))
-        )
-
+        quality_slider = Slider(min=10, max=95, value=70, step=5, value_track=True, value_track_color=get_color_from_hex('#5865F2'), cursor_size=(dp(20), dp(20)))
         self.quality_label = Label(text='70%', size_hint_x=None, width=dp(50), color=get_color_from_hex('#FFFFFF'))
-
         def update_quality(instance, value):
             v = int(value)
             self.send_quality_setting(v)
             self.quality_label.text = f"{v}%"
-
         quality_slider.bind(value=update_quality)
-
         slider_layout.add_widget(quality_slider)
         slider_layout.add_widget(self.quality_label)
         quality_card.add_widget(slider_layout)
+        
+        share_button = Button(text='Partager l\'accès à distance', on_press=self.generate_share_code, size_hint_y=None, height=dp(50))
+        quality_card.add_widget(share_button)
 
         root_layout.add_widget(quality_card)
         root_layout.add_widget(BoxLayout())
-
         settings_tab.add_widget(root_layout)
         self.tab_panel.add_widget(settings_tab)
 
-        # --- Onglet Transferts (Fusionné et Redesigné) ---
         self.transfer_tab = TabbedPanelItem(text='Transferts')
-
         main_transfer_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
-
-        # Carte pour l'explorateur de fichiers
         remote_files_card = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(5))
         with remote_files_card.canvas.before:
             Color(rgba=get_color_from_hex('#2C2F33'))
             remote_files_card.rect = RoundedRectangle(size=remote_files_card.size, pos=remote_files_card.pos, radius=[dp(15)])
-        remote_files_card.bind(
-            pos=lambda i, v: setattr(remote_files_card.rect, 'pos', v),
-            size=lambda i, v: setattr(remote_files_card.rect, 'size', v)
-        )
-
+        remote_files_card.bind(pos=lambda i, v: setattr(remote_files_card.rect, 'pos', v), size=lambda i, v: setattr(remote_files_card.rect, 'size', v))
         toolbar = BoxLayout(size_hint_y=None, height=dp(40), padding=(dp(5), 0), spacing=dp(10))
         up_button = Button(text='⬆', font_name='seguisym.ttf', font_size='20sp', on_press=self.go_up_dir, size_hint_x=None, width=dp(40))
         self.remote_path_label = Label(text='/', halign='left', valign='middle', color=get_color_from_hex('#FFFFFF'))
@@ -621,85 +639,45 @@ class RemoteViewerApp(App):
         toolbar.add_widget(self.remote_path_label)
         toolbar.add_widget(refresh_button)
         remote_files_card.add_widget(toolbar)
-
-        self.file_search_input = TextInput(
-            hint_text="Rechercher...", multiline=False,
-            size_hint_y=None, height=dp(35)
-        )
+        self.file_search_input = TextInput(hint_text="Rechercher...", multiline=False, size_hint_y=None, height=dp(35))
         self.file_search_input.bind(text=self.filter_remote_files)
         remote_files_card.add_widget(self.file_search_input)
-
         header = BoxLayout(size_hint_y=None, height=dp(30), padding=(dp(10), 0))
         header.add_widget(Label(text='', size_hint_x=None, width=dp(30)))
         header.add_widget(Label(text='Nom', bold=True, halign='left', color=get_color_from_hex('#99AAB5')))
         header.add_widget(Label(text='Taille', bold=True, size_hint_x=None, width=dp(80), halign='right', color=get_color_from_hex('#99AAB5')))
         remote_files_card.add_widget(header)
-
         self.file_browser_grid = GridLayout(cols=1, size_hint_y=None)
         self.file_browser_grid.bind(minimum_height=self.file_browser_grid.setter('height'))
         scroll_view_files = ScrollView()
         scroll_view_files.add_widget(self.file_browser_grid)
         remote_files_card.add_widget(scroll_view_files)
-
-        transfer_controls_card = BoxLayout(
-            orientation='vertical', size_hint_y=None, height=dp(180),
-            padding=dp(20), spacing=dp(10)
-        )
+        transfer_controls_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(180), padding=dp(20), spacing=dp(10))
         with transfer_controls_card.canvas.before:
             Color(rgba=get_color_from_hex('#23272A'))
             transfer_controls_card.rect = RoundedRectangle(size=transfer_controls_card.size, pos=transfer_controls_card.pos, radius=[dp(15)])
-        transfer_controls_card.bind(
-            pos=lambda i, v: setattr(transfer_controls_card.rect, 'pos', v),
-            size=lambda i, v: setattr(transfer_controls_card.rect, 'size', v)
-        )
-
-        transfer_controls_card.add_widget(Label(
-            text='Contrôle des Transferts', font_size='16sp', bold=True,
-            size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')
-        ))
-
-        self.transfer_status_label = Label(
-            text='Prêt.', size_hint_y=None, height=dp(25),
-            color=get_color_from_hex('#99AAB5'), font_size='12sp'
-        )
+        transfer_controls_card.bind(pos=lambda i, v: setattr(transfer_controls_card.rect, 'pos', v), size=lambda i, v: setattr(transfer_controls_card.rect, 'size', v))
+        transfer_controls_card.add_widget(Label(text='Contrôle des Transferts', font_size='16sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
+        self.transfer_status_label = Label(text='Prêt.', size_hint_y=None, height=dp(25), color=get_color_from_hex('#99AAB5'), font_size='12sp')
         transfer_controls_card.add_widget(self.transfer_status_label)
-
         self.transfer_progress_bar = ColorProgressBar(max=100, size_hint_y=None, height=dp(15))
         transfer_controls_card.add_widget(self.transfer_progress_bar)
-
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(15), padding=(0, dp(10), 0, 0))
-
-        send_file_button = Button(
-            text='Envoyer un fichier...', on_press=self.choose_and_upload_file,
-            font_size='16sp', background_color=(0,0,0,0)
-        )
+        send_file_button = Button(text='Envoyer un fichier...', on_press=self.choose_and_upload_file, font_size='16sp', background_color=(0,0,0,0))
         with send_file_button.canvas.before:
             Color(rgba=get_color_from_hex('#5865F2'))
             send_file_button.rect = RoundedRectangle(size=send_file_button.size, pos=send_file_button.pos, radius=[dp(8)])
-        send_file_button.bind(
-            pos=lambda i, v: setattr(send_file_button.rect, 'pos', v),
-            size=lambda i, v: setattr(send_file_button.rect, 'size', v)
-        )
-
-        self.cancel_button = Button(
-            text='Annuler', on_press=self.cancel_transfer, disabled=True,
-            font_size='16sp', background_color=(0,0,0,0), size_hint_x=0.5
-        )
+        send_file_button.bind(pos=lambda i, v: setattr(send_file_button.rect, 'pos', v), size=lambda i, v: setattr(send_file_button.rect, 'size', v))
+        self.cancel_button = Button(text='Annuler', on_press=self.cancel_transfer, disabled=True, font_size='16sp', background_color=(0,0,0,0), size_hint_x=0.5)
         with self.cancel_button.canvas.before:
             Color(rgba=get_color_from_hex('#40444B'))
             self.cancel_button.rect = RoundedRectangle(size=self.cancel_button.size, pos=self.cancel_button.pos, radius=[dp(8)])
-        self.cancel_button.bind(
-            pos=lambda i, v: setattr(self.cancel_button.rect, 'pos', v),
-            size=lambda i, v: setattr(self.cancel_button.rect, 'size', v)
-        )
-
+        self.cancel_button.bind(pos=lambda i, v: setattr(self.cancel_button.rect, 'pos', v), size=lambda i, v: setattr(self.cancel_button.rect, 'size', v))
         buttons_layout.add_widget(send_file_button)
         buttons_layout.add_widget(self.cancel_button)
         transfer_controls_card.add_widget(buttons_layout)
-
         main_transfer_layout.add_widget(remote_files_card)
         main_transfer_layout.add_widget(transfer_controls_card)
-
         self.transfer_tab.add_widget(main_transfer_layout)
         self.tab_panel.add_widget(self.transfer_tab)
 
@@ -714,61 +692,41 @@ class RemoteViewerApp(App):
         send_button = Button(text='Envoyer', size_hint_x=None, width=dp(80), on_press=self.send_chat_message)
         chat_input_layout.add_widget(self.chat_input)
         chat_input_layout.add_widget(send_button)
-        
-        # Add chat history and input to the main chat layout
         for widget in [chat_scroll_view, chat_input_layout]:
             chat_layout.add_widget(widget)
-
         self.chat_tab.add_widget(chat_layout)
         self.tab_panel.add_widget(self.chat_tab)
 
         about_tab = TabbedPanelItem(text='À propos')
         about_layout = BoxLayout(orientation='vertical', padding=dp(30), spacing=dp(20))
-
-        # Carte principale avec logo et titre
         title_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), padding=dp(20), spacing=dp(15))
         with title_card.canvas.before:
             Color(rgba=get_color_from_hex('#2C2F33'))
             title_card.rect = RoundedRectangle(size=title_card.size, pos=title_card.pos, radius=[dp(15)])
         title_card.bind(pos=lambda i, v: setattr(title_card.rect, 'pos', v), size=lambda i, v: setattr(title_card.rect, 'size', v))
-
         logo = Image(source='logo.ico', size_hint_y=None, height=dp(80), allow_stretch=True)
         title_label = Label(text='[b]Hosanna Remote Viewer[/b]', markup=True, font_size='24sp', size_hint_y=None, height=dp(40), color=get_color_from_hex('#FFFFFF'))
         version_label = Label(text='Version 1.0.0', font_size='14sp', size_hint_y=None, height=dp(20), color=get_color_from_hex('#99AAB5'))
-
         title_card.add_widget(logo)
         title_card.add_widget(title_label)
         title_card.add_widget(version_label)
         about_layout.add_widget(title_card)
-
-        # Carte des informations
         info_card = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(20), spacing=dp(10))
         info_card.bind(minimum_height=info_card.setter('height'))
         with info_card.canvas.before:
             Color(rgba=get_color_from_hex('#2C2F33'))
             info_card.rect = RoundedRectangle(size=info_card.size, pos=info_card.pos, radius=[dp(15)])
         info_card.bind(pos=lambda i, v: setattr(info_card.rect, 'pos', v), size=lambda i, v: setattr(info_card.rect, 'size', v))
-
         info_card.add_widget(Label(text='[b]Développé par :[/b] Chadrack Mbu Jess', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
         info_card.add_widget(Label(text='© 2025', markup=True, font_size='16sp', size_hint_y=None, height=dp(30), color=get_color_from_hex('#99AAB5')))
-
         desc_title = Label(text='[b]Description :[/b]', markup=True, font_size='16sp', size_hint_y=None, height=dp(40), color=get_color_from_hex('#FFFFFF'), halign='left')
         desc_title.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
         info_card.add_widget(desc_title)
-
-        description = Label(
-            text='Une application de bureau à distance sécurisée et performante, conçue pour offrir un contrôle fluide et un accès facile à vos fichiers et informations système.',
-            font_size='14sp',
-            color=get_color_from_hex('#99AAB5'),
-            halign='left',
-            valign='top'
-        )
+        description = Label(text='Une application de bureau à distance sécurisée et performante, conçue pour offrir un contrôle fluide et un accès facile à vos fichiers et informations système.', font_size='14sp', color=get_color_from_hex('#99AAB5'), halign='left', valign='top')
         description.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
         info_card.add_widget(description)
-
         about_layout.add_widget(info_card)
-        about_layout.add_widget(BoxLayout()) # Pour pousser les cartes vers le haut
-
+        about_layout.add_widget(BoxLayout())
         about_tab.add_widget(about_layout)
         self.tab_panel.add_widget(about_tab)
 
@@ -784,9 +742,7 @@ class RemoteViewerApp(App):
             Color(rgba=get_color_from_hex('#2C2F33'))
             card.rect = RoundedRectangle(size=card.size, pos=card.pos, radius=[dp(15)])
         card.bind(pos=lambda i, v: setattr(card.rect, 'pos', v), size=lambda i, v: setattr(card.rect, 'size', v))
-
         card.add_widget(Label(text='Informations Générales', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
-
         grid = GridLayout(cols=2, spacing=dp(2))
         info_keys = {"node_name": "Nom", "user_name": "Utilisateur", "os_version": "OS", "architecture": "Arch"}
         for key, name in info_keys.items():
@@ -803,46 +759,34 @@ class RemoteViewerApp(App):
             Color(rgba=get_color_from_hex('#2C2F33'))
             card.rect = RoundedRectangle(size=card.size, pos=card.pos, radius=[dp(15)])
         card.bind(pos=lambda i, v: setattr(card.rect, 'pos', v), size=lambda i, v: setattr(card.rect, 'size', v))
-
         card.add_widget(Label(text='Ressources Système', font_size='18sp', bold=True, size_hint_y=None, height=dp(30), color=get_color_from_hex('#FFFFFF')))
-
         resources_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10))
         resources_layout.bind(minimum_height=resources_layout.setter('height'))
-
         cpu_layout = self._create_resource_section('cpu', 'Utilisation CPU')
         resources_layout.add_widget(cpu_layout)
-
         ram_layout = self._create_resource_section('ram', 'Utilisation RAM')
         resources_layout.add_widget(ram_layout)
-
         self.disk_grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(10))
         self.disk_grid.bind(minimum_height=self.disk_grid.setter('height'))
         resources_layout.add_widget(self.disk_grid)
-
         card.add_widget(resources_layout)
         return card, resources_layout
 
     def _create_resource_section(self, key, title):
         section = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(65), spacing=dp(2))
-
         title_layout = BoxLayout(size_hint_y=None, height=dp(20))
         title_label = Label(text=title, font_size='14sp', halign='left', color=get_color_from_hex('#FFFFFF'))
         title_label.bind(text_size=lambda i, ts: setattr(i, 'width', ts[0]))
         title_layout.add_widget(title_label)
-
         if key == 'cpu':
             freq_label = Label(text="Freq: -", size_hint_x=None, width=dp(150), font_size='12sp', halign='right', color=get_color_from_hex('#99AAB5'))
             self.sys_info_widgets['cpu_freq'] = freq_label
             title_layout.add_widget(freq_label)
-
         section.add_widget(title_layout)
-
         bar = ColorProgressBar(max=100, size_hint_y=None, height=dp(10))
         percent_label = Label(text="0%", size_hint_y=None, height=dp(20), font_size='12sp', halign='left', color=get_color_from_hex('#FFFFFF'))
         percent_label.bind(text_size=lambda i, ts: setattr(i, 'width', ts[0]))
-
         self.sys_info_widgets[key] = {'bar': bar, 'percent': percent_label}
-
         section.add_widget(bar)
         section.add_widget(percent_label)
         return section
@@ -850,23 +794,18 @@ class RemoteViewerApp(App):
     def on_tab_switch(self, instance, value):
         if value == self.desktop_tab:
             self.remote_widget.setup_keyboard()
-            self.stop_camera_stream() # Arrêter le flux caméra si on quitte l'onglet caméra
+            self.stop_camera_stream()
         else:
             self.remote_widget.release_keyboard()
-
         if value == self.camera_tab:
-            # On ne démarre pas automatiquement, l'utilisateur doit cliquer sur le bouton
             pass
         else:
-            self.stop_camera_stream() # Arrêter le flux caméra si on quitte l'onglet caméra
-
+            self.stop_camera_stream()
         if value == self.sys_info_tab: self.start_sys_info_updates()
         else: self.stop_sys_info_updates()
 
     def on_camera_selection_text(self, spinner, text):
-        # This method is called when the spinner's text changes (i.e., a new camera is selected)
         try:
-            # Extract the index from the text, e.g., "Caméra 0" -> 0
             index = int(text.split(' ')[1])
             self.select_camera(index)
         except (ValueError, IndexError):
@@ -876,36 +815,30 @@ class RemoteViewerApp(App):
         if self.selected_camera_index != index:
             self.selected_camera_index = index
             print(f"Client selected camera index: {index}")
-            # Send command to server to switch camera
             if self.remote_widget.client_socket:
                 self.remote_widget.send_command(f"SELECT_CAMERA,{index}")
-            # If camera is currently streaming, restart it with the new selection
             if self.is_camera_streaming:
-                self.stop_camera_stream() # Stop current stream
-                self.start_camera_stream(None) # Start new stream with selected camera
+                self.stop_camera_stream()
+                self.start_camera_stream(None)
 
     def start_camera_stream(self, instance):
         if not self.is_camera_streaming and self.selected_camera_index != -1:
             self.remote_camera_widget.send_command("START_CAMERA")
-            # Also send the current selected camera index to ensure the server is streaming the right one
             self.remote_camera_widget.send_command(f"SELECT_CAMERA,{self.selected_camera_index}")
             self.is_camera_streaming = True
             self.start_camera_button.disabled = True
-            self.stop_camera_button.disabled = False
-            # Optionnel: arrêter le streaming écran si la caméra est activée
+            self.stop_camera_button.disabled = True
             self.remote_widget.send_command("STOP_SCREEN")
         elif self.selected_camera_index == -1:
             print("[!] Impossible de démarrer le streaming: aucune caméra disponible.")
 
-    def stop_camera_stream(self, instance=None): # instance=None pour pouvoir l'appeler sans événement de bouton
+    def stop_camera_stream(self, instance=None):
         if self.is_camera_streaming:
             self.remote_camera_widget.send_command("STOP_CAMERA")
-        # Always reset the state, even if the command fails to send (e.g., on disconnect)
         self.is_camera_streaming = False
         self.start_camera_button.disabled = False
         self.stop_camera_button.disabled = True
-        self.remote_camera_widget.texture = self.camera_placeholder_image.texture # Revert to placeholder
-        # Optionnel: redémarrer le streaming écran si la caméra est désactivée
+        self.remote_camera_widget.texture = self.camera_placeholder_image.texture
         if self.remote_widget.client_socket:
             self.remote_widget.send_command("START_SCREEN")
 
@@ -919,11 +852,18 @@ class RemoteViewerApp(App):
             self.sys_info_update_event.cancel()
             self.sys_info_update_event = None
 
+    def _get_file_transfer_address(self):
+        # If file_server_address is set (remote connection), use it
+        if self.file_server_address:
+            return self.file_server_address
+        # Otherwise, use the local IP/Port from the input fields
+        return self.ip_input.text, int(self.port_input.text) - 1
+
     def _request_sys_info_thread(self): threading.Thread(target=self._get_sys_info_from_server, daemon=True).start()
 
     def _get_sys_info_from_server(self):
         try:
-            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
+            host, file_port = self._get_file_transfer_address()
             header_str = "GET_SYS_INFO"
             header_bytes = header_str.encode('utf-8')
             len_info = struct.pack("!H", len(header_bytes))
@@ -944,10 +884,8 @@ class RemoteViewerApp(App):
         if 'error' in data:
             self.sys_info_labels['node_name'].text = f"Erreur: {data['error']}"
             return
-
         for key, label in self.sys_info_labels.items():
             label.text = str(data.get(key, '-'))
-
         cpu_info = data.get('cpu', {})
         cpu_usage = cpu_info.get('usage', 0)
         self.sys_info_widgets['cpu']['bar'].value = cpu_usage
@@ -955,14 +893,12 @@ class RemoteViewerApp(App):
         if cpu_usage >= 95: self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0, 0.15, 1)
         elif cpu_usage >= 80: self.sys_info_widgets['cpu']['bar'].bar_color = (1, 0.65, 0, 1)
         else: self.sys_info_widgets['cpu']['bar'].bar_color = (0, 0.55, 1, 1)
-
         freq_current = cpu_info.get('freq_current', 0)
         freq_max = cpu_info.get('freq_max', 0)
         freq_text = "Freq: "
         if freq_current > 0: freq_text += f"{freq_current / 1000:.2f} GHz"
         if freq_max > 0: freq_text += f" (Max: {freq_max / 1000:.2f} GHz)"
         self.sys_info_widgets['cpu_freq'].text = freq_text
-
         ram_info = data.get('ram', {})
         ram_percent = ram_info.get('percent', 0)
         self.sys_info_widgets['ram']['bar'].value = ram_percent
@@ -970,13 +906,11 @@ class RemoteViewerApp(App):
         if ram_percent >= 95: self.sys_info_widgets['ram']['bar'].bar_color = (1, 0, 0.15, 1)
         elif ram_percent >= 80: self.sys_info_widgets['ram']['bar'].bar_color = (1, 0.65, 0, 1)
         else: self.sys_info_widgets['ram']['bar'].bar_color = (0, 0.55, 1, 1)
-
         for disk in data.get('disks', []):
             disk_id = disk['device']
             if disk_id not in self.sys_info_widgets:
                 disk_section = self._create_resource_section(disk_id, f"Disque: {disk.get('mountpoint', disk_id)}")
                 self.disk_grid.add_widget(disk_section)
-
             disk_percent = disk.get('percent', 0)
             self.sys_info_widgets[disk_id]['bar'].value = disk_percent
             self.sys_info_widgets[disk_id]['percent'].text = f"{disk_percent:.1f}% ({sizeof_fmt(disk.get('used',0))} / {sizeof_fmt(disk.get('total',0))})"
@@ -1007,7 +941,7 @@ class RemoteViewerApp(App):
 
     def _list_remote_dir_thread(self, path):
         try:
-            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
+            host, file_port = self._get_file_transfer_address()
             header_str = f"LIST_DIR,{path}"
             header_bytes = header_str.encode('utf-8')
             len_info = struct.pack("!H", len(header_bytes))
@@ -1056,7 +990,7 @@ class RemoteViewerApp(App):
         try:
             filename, filesize = os.path.basename(file_path), os.path.getsize(file_path)
             update_status(f"Envoi de {filename}..."); update_progress(0)
-            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
+            host, file_port = self._get_file_transfer_address()
             header_str = f"UPLOAD,{filename},{filesize}"
             header_bytes = header_str.encode('utf-8')
             len_info = struct.pack("!H", len(header_bytes))
@@ -1099,7 +1033,7 @@ class RemoteViewerApp(App):
         Clock.schedule_once(lambda dt: setattr(self.cancel_button, 'disabled', False))
         try:
             update_status(f"Téléchargement de {os.path.basename(remote_path)}..."); update_progress(0)
-            host, file_port = self.ip_input.text, int(self.port_input.text) - 1
+            host, file_port = self._get_file_transfer_address()
             header_str = f"DOWNLOAD,{remote_path}"
             header_bytes = header_str.encode('utf-8')
             len_info = struct.pack("!H", len(header_bytes))
@@ -1174,7 +1108,7 @@ class RemoteViewerApp(App):
                     self.add_message_to_chat_history(f"[b][color=00BFFF]Moi:[/color][/b] {message}")
                     self.chat_input.text = ''
                 except (BrokenPipeError, ConnectionResetError): self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Serveur déconnecté.")
-                except Exception as e: self.add_message_to_chat_history(f"[b][color=FF0000]Erreur:[/color][/b] {e}")
+                except Exception as e: print(f"[!] Erreur lors de l'envoi du presse-papiers au serveur: {e}")
             else: self.add_message_to_chat_history("[b][color=FF0000]Erreur:[/color][/b] Non connecté au serveur.")
 
     def add_message_to_chat_history(self, message):
@@ -1229,18 +1163,64 @@ class RemoteViewerApp(App):
         self.status_label.text = f"Serveur trouvé à l'adresse {ip} !"
 
     def connect_to_server(self, instance):
-        host = self.ip_input.text.strip()
-        port_str = self.port_input.text.strip()
-        if not host or not port_str:
-            self.status_label.text = "L'adresse IP et le port sont requis."
-            return
-        try:
-            port = int(port_str)
-        except ValueError:
-            self.status_label.text = "Le port doit être un nombre valide."
-            return
-        self.status_label.text = f"Connexion à {host}:{port}..."
-        threading.Thread(target=self.receive_frames, args=(host, port), daemon=True).start()
+        active_tab = self.connection_tabs.current_tab
+        if active_tab == self.local_tab:
+            host = self.ip_input.text.strip()
+            port_str = self.port_input.text.strip()
+            if not host or not port_str:
+                self.status_label.text = "L'adresse IP et le port sont requis."
+                return
+            try:
+                port = int(port_str)
+            except ValueError:
+                self.status_label.text = "Le port doit être un nombre valide."
+                return
+            self.main_server_address = (host, port)
+            self.file_server_address = (host, port - 1) # For local, file port is main_port - 1
+            self.status_label.text = f"Connexion à {host}:{port}..."
+            threading.Thread(target=self.receive_frames, args=(host, port), daemon=True).start()
+        
+        elif active_tab == self.remote_tab:
+            host = self.remote_address_input.text.strip()
+            port_str = self.remote_port_input.text.strip()
+            if not host or not port_str:
+                self.status_label.text = "L'adresse et le port publics sont requis."
+                return
+            try:
+                port = int(port_str)
+            except ValueError:
+                self.status_label.text = "Le port public doit être un nombre valide."
+                return
+            # For remote, main_server_address and file_server_address will be set by SHARE_INFO_GENERATED
+            # We connect to the main port first, and the server will send us the file port info
+            self.main_server_address = (host, port)
+            self.file_server_address = None # Will be updated by server
+            self.status_label.text = f"Connexion à {host}:{port}..."
+            threading.Thread(target=self.receive_frames, args=(host, port), daemon=True).start()
+
+    def generate_share_code(self, instance):
+        if self.remote_widget.client_socket:
+            self.remote_widget.send_command("GENERATE_SHARE_CODE")
+            self.status_label.text = "Génération des informations de partage..."
+
+    def show_share_code_popup(self, main_address, main_port, file_address, file_port):
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        title = 'Informations de Partage'
+        
+        main_addr_label = Label(text=f"[b]Adresse principale:[/b] {main_address}", markup=True, font_size='16sp')
+        main_port_label = Label(text=f"[b]Port principal:[/b] {main_port}", markup=True, font_size='16sp')
+        file_addr_label = Label(text=f"[b]Adresse fichiers:[/b] {file_address}", markup=True, font_size='16sp')
+        file_port_label = Label(text=f"[b]Port fichiers:[/b] {file_port}", markup=True, font_size='16sp')
+        info_label = Label(text="Communiquez ces informations à l'utilisateur distant.", text_size=(dp(350), None), halign='center')
+        
+        content.add_widget(main_addr_label)
+        content.add_widget(main_port_label)
+        content.add_widget(file_addr_label)
+        content.add_widget(file_port_label)
+        content.add_widget(info_label)
+        
+        popup = Popup(title=title, content=content, size_hint=(None, None), size=(dp(400), dp(300)))
+        popup.open()
 
     def receive_frames(self, host, port):
         context = ssl.create_default_context(); context.check_hostname = False; context.verify_mode = ssl.CERT_NONE
@@ -1251,7 +1231,7 @@ class RemoteViewerApp(App):
             client_socket.connect((host, port))
             client_socket.settimeout(None)
             self.remote_widget.client_socket = client_socket
-            self.remote_camera_widget.client_socket = client_socket # Assigner le socket à RemoteCameraWidget
+            self.remote_camera_widget.client_socket = client_socket
             self.send_quality_setting(70)
             Clock.schedule_once(self.switch_to_remote_screen)
             self.clipboard_stop_event.clear()
@@ -1278,7 +1258,7 @@ class RemoteViewerApp(App):
                         width, height = struct.unpack("!II", payload[:struct.calcsize("!II")])
                         self.remote_widget.server_resolution = (width, height)
                         Clock.schedule_once(lambda dt, data=payload[struct.calcsize("!II"):]: self.update_image(data))
-                    elif msg_type_byte == MSG_TYPE_CAMERA: # Gérer le flux de la caméra
+                    elif msg_type_byte == MSG_TYPE_CAMERA:
                         len_info = self.recv_all(self.remote_camera_widget.client_socket, 4)
                         if not len_info: break
                         payload_size = struct.unpack("!I", len_info)[0]
@@ -1297,7 +1277,21 @@ class RemoteViewerApp(App):
                         parts = command.split(',', 1)
                         cmd_type = parts[0]
                         value_str = parts[1] if len(parts) > 1 else ""
-                        if cmd_type == 'CLIPBOARD_UPDATE':
+                        
+                        if cmd_type == 'SHARE_INFO_GENERATED':
+                            # Split value_str into main_address, main_port, file_address, file_port
+                            share_parts = value_str.split(',')
+                            if len(share_parts) == 4:
+                                main_addr, main_p, file_addr, file_p = share_parts
+                                self.main_server_address = (main_addr, int(main_p))
+                                self.file_server_address = (file_addr, int(file_p))
+                                Clock.schedule_once(lambda dt: self.show_share_code_popup(main_addr, main_p, file_addr, file_p))
+                            else:
+                                print(f"[!] Erreur: Format SHARE_INFO_GENERATED inattendu: {value_str}")
+                                Clock.schedule_once(lambda dt: self.show_connection_error("Erreur de partage: Format de données invalide."))
+                        elif cmd_type == 'SHARE_INFO_ERROR':
+                            self.show_connection_error(f"Erreur de partage: {value_str}")
+                        elif cmd_type == 'CLIPBOARD_UPDATE':
                             content = value_str
                             try:
                                 pyperclip.copy(content)
@@ -1307,7 +1301,7 @@ class RemoteViewerApp(App):
                         elif cmd_type == 'CHAT_MESSAGE_FROM_SERVER':
                             message = value_str
                             self.add_message_to_chat_history(f"[b][color=00FF00]Serveur:[/color][/b] {message}")
-                        elif cmd_type == 'CAMERA_LIST': # NEW: Handle CAMERA_LIST command
+                        elif cmd_type == 'CAMERA_LIST':
                             try:
                                 camera_indices = json.loads(value_str)
                                 Clock.schedule_once(lambda dt: self.update_available_cameras(camera_indices))
@@ -1326,19 +1320,16 @@ class RemoteViewerApp(App):
     def update_available_cameras(self, camera_indices):
         self.available_cameras = [f"Caméra {i}" for i in camera_indices]
         if self.available_cameras:
-            # Set the spinner values
             self.camera_selector.values = self.available_cameras
-            # Set default selection to the first available camera if not already set
             if not self.camera_selector.text or self.camera_selector.text not in self.available_cameras:
                 self.camera_selector.text = self.available_cameras[0]
                 self.selected_camera_index = int(self.available_cameras[0].split(' ')[1])
-                # Send initial selection to server
                 if self.remote_widget.client_socket:
                     self.remote_widget.send_command(f"SELECT_CAMERA,{self.selected_camera_index}")
         else:
             self.camera_selector.values = ["Aucune caméra"]
             self.camera_selector.text = "Aucune caméra"
-            self.selected_camera_index = -1 # Indicate no camera selected
+            self.selected_camera_index = -1
             self.start_camera_button.disabled = True
             self.stop_camera_button.disabled = True
             print("[!] Aucune caméra détectée sur le serveur.")
@@ -1347,16 +1338,13 @@ class RemoteViewerApp(App):
         self.sm.current = 'remote'
         self.remote_widget.setup_keyboard()
         self.list_remote_dir("")
-        # S'assurer que le streaming caméra est arrêté par défaut
         self.stop_camera_stream()
-        # The camera list will be received and updated by the receive_frames loop.
-        # No need to explicitly call update_available_cameras here.
 
     def switch_to_connect_screen(self, dt):
         self.remote_widget.release_keyboard()
         self.clipboard_stop_event.set()
-        if self.sm.current == 'remote': # Only stop streams if we are on the remote screen
-            self.stop_camera_stream() # Arrêter le streaming caméra à la déconnexion
+        if self.sm.current == 'remote':
+            self.stop_camera_stream()
         self.status_label.text = "Déconnecté."; self.sm.current = 'connect'
     def show_connection_error(self, error_msg): self.status_label.text = f"Échec: {error_msg}"
 
@@ -1383,7 +1371,6 @@ class RemoteViewerApp(App):
         if not self.is_camera_streaming:
             return
         try:
-            # The texture will be drawn on top of the source image.
             buf = io.BytesIO(jpeg_bytes)
             core_image = CoreImage(buf, ext='jpg')
             self.remote_camera_widget.texture = core_image.texture

@@ -18,7 +18,9 @@ from pynput.keyboard import Key, Controller as KeyboardController
 import pyperclip
 import tkinter as tk
 from tkinter import scrolledtext
-import cv2 # Importation d'OpenCV
+import cv2
+import subprocess
+import re
 
 # --- Fonction pour trouver les ressources (pour PyInstaller) ---
 def resource_path(relative_path):
@@ -49,6 +51,7 @@ KEY_MAP = {
 }
 
 command_queue = Queue()
+tunnel_processes = {} # Store multiple tunnel processes
 
 def command_processor(stop_event):
     mouse_ctrl = MouseController()
@@ -108,32 +111,24 @@ def recv_all(sock, n):
 
 MSG_TYPE_IMAGE = b'\x01'
 MSG_TYPE_COMMAND = b'\x02'
-MSG_TYPE_CAMERA = b'\x03' # Nouveau type de message pour la caméra
+MSG_TYPE_CAMERA = b'\x03'
 active_chat_windows = {}
 
-def send_chat_message_to_client(client_socket, message):
+def send_command_to_client(client_socket, command_str):
     try:
-        command_str = f"CHAT_MESSAGE_FROM_SERVER,{message}"
         command_bytes = command_str.encode('utf-8')
         len_info = struct.pack("!H", len(command_bytes))
         client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
     except (BrokenPipeError, ConnectionResetError):
-        print("[!] Client déconnecté lors de l'envoi du message chat.")
-    except ssl.SSLError as e: # Catch specific SSL errors
-        print(f"[!] Erreur SSL lors de l'envoi du message chat au client: {e}")
+        print("[!] Client déconnecté lors de l'envoi de la commande.")
     except Exception as e:
-        print(f"[!] Erreur lors de l'envoi du message chat au client: {e}")
+        print(f"[!] Erreur lors de l'envoi de la commande au client: {e}")
+
+def send_chat_message_to_client(client_socket, message):
+    send_command_to_client(client_socket, f"CHAT_MESSAGE_FROM_SERVER,{message}")
 
 def send_clipboard_to_client(client_socket, content):
-    try:
-        command_str = f"CLIPBOARD_UPDATE,{content}"
-        command_bytes = command_str.encode('utf-8')
-        len_info = struct.pack("!H", len(command_bytes))
-        client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
-    except (BrokenPipeError, ConnectionResetError):
-        pass
-    except Exception as e:
-        print(f"[!] Erreur lors de l'envoi du presse-papiers au client: {e}")
+    send_command_to_client(client_socket, f"CLIPBOARD_UPDATE,{content}")
 
 def monitor_and_sync_clipboard(client_socket, stop_event, session_data):
     try:
@@ -172,118 +167,76 @@ class ServerChatWindow:
     def _create_gui(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
-
-        window_width = 1000
-        window_height = 800
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        center_x = int(screen_width/2 - window_width / 2)
-        center_y = int(screen_height/2 - window_height / 2)
+        window_width, window_height = 1000, 800
+        screen_width, screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        center_x, center_y = int(screen_width/2 - window_width / 2), int(screen_height/2 - window_height / 2)
         self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
-
         self.root.attributes("-topmost", True)
-
         main_frame = tk.Frame(self.root, highlightbackground="gray", highlightcolor="gray", highlightthickness=1)
         main_frame.pack(fill=tk.BOTH, expand=True)
-
         title_bar = tk.Frame(main_frame, bg='gray', relief='raised', bd=0)
         title_bar.pack(expand=False, fill='x')
-
         title_label = tk.Label(title_bar, text=f"Chat avec {self.client_address[0]}", bg='gray', fg='white')
         title_label.pack(side=tk.LEFT, padx=10)
-
         title_bar.bind("<ButtonPress-1>", self._on_press)
         title_bar.bind("<B1-Motion>", self._on_drag)
         title_label.bind("<ButtonPress-1>", self._on_press)
         title_label.bind("<B1-Motion>", self._on_drag)
-
         try:
-            icon_path = resource_path("logo_-hosanna-tv-copie.ico")
-            self.root.iconbitmap(icon_path)
+            self.root.iconbitmap(resource_path("logo_-hosanna-tv-copie.ico"))
         except Exception as e:
             print(f"[!] Erreur lors du chargement de l'icône: {e}")
-
         self.chat_history = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD, state='disabled', font=("Arial", 10))
         self.chat_history.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
         self.chat_history.tag_config("me", foreground="blue")
         self.chat_history.tag_config("client", foreground="green")
         self.chat_history.tag_config("system", foreground="red")
-
         input_frame = tk.Frame(main_frame)
         input_frame.pack(padx=10, pady=5, fill=tk.X)
-
         self.message_var = tk.StringVar()
         self.message_var.trace_add("write", self._update_send_button_state)
         self.message_input = tk.Entry(input_frame, font=("Arial", 10), textvariable=self.message_var)
         self.message_input.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         self.message_input.bind("<Return>", self._send_message_from_gui)
-
         close_button = tk.Button(input_frame, text="Fermer", command=self._on_closing, font=("Arial", 10))
         close_button.pack(side=tk.RIGHT, padx=(5, 0))
-
         self.send_button = tk.Button(input_frame, text="Envoyer", command=self._send_message_from_gui, font=("Arial", 10), state='disabled')
         self.send_button.pack(side=tk.RIGHT, padx=(5, 5))
-
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         self.root.grab_set_global()
         self.root.after(100, self._check_message_queue)
 
-    def _on_press(self, event):
-        self._offset_x = event.x
-        self._offset_y = event.y
-
-    def _on_drag(self, event):
-        x = self.root.winfo_pointerx() - self._offset_x
-        y = self.root.winfo_pointery() - self._offset_y
-        self.root.geometry(f"+{x}+{y}")
-
-    def _update_send_button_state(self, *args):
-        if self.message_var.get().strip():
-            self.send_button.config(state='normal')
-        else:
-            self.send_button.config(state='disabled')
-
+    def _on_press(self, event): self._offset_x, self._offset_y = event.x, event.y
+    def _on_drag(self, event): self.root.geometry(f"+{self.root.winfo_pointerx() - self._offset_x}+{self.root.winfo_pointery() - self._offset_y}")
+    def _update_send_button_state(self, *args): self.send_button.config(state='normal' if self.message_var.get().strip() else 'disabled')
     def _check_message_queue(self):
         try:
             while True:
                 sender, message = self.message_queue.get_nowait()
                 self._add_message_to_history(sender, message)
-        except Empty:
-            pass
+        except Empty: pass
         finally:
-            if self.root and self.root.winfo_exists():
-                self.root.after(100, self._check_message_queue)
-
+            if self.root and self.root.winfo_exists(): self.root.after(100, self._check_message_queue)
     def _add_message_to_history(self, sender, message):
         self.chat_history.config(state='normal')
-        if sender == "Moi": self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] Moi: {message}\n", "me")
-        elif sender == "Client": self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] Client: {message}\n", "client")
-        elif sender == "Système": self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] Système: {message}\n", "system")
+        self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {sender}: {message}\n", sender.lower())
         self.chat_history.config(state='disabled')
         self.chat_history.see(tk.END)
-
     def add_message(self, sender, message):
-        if self.root and self.root.winfo_exists():
-            self.message_queue.put((sender, message))
-
+        if self.root and self.root.winfo_exists(): self.message_queue.put((sender, message))
     def _send_message_from_gui(self, event=None):
         message = self.message_input.get().strip()
         if message:
             send_chat_message_to_client(self.client_socket, message)
             self._add_message_to_history("Moi", message)
             self.message_input.delete(0, tk.END)
-
     def _on_closing(self):
         send_chat_message_to_client(self.client_socket, "L'utilisateur a fermé la fenêtre de chat. Envoyez un nouveau message pour la rouvrir.")
         self.root.grab_release()
         self.root.destroy()
-        if self.on_window_closed_callback:
-            self.on_window_closed_callback(self.client_address)
-
+        if self.on_window_closed_callback: self.on_window_closed_callback(self.client_address)
     def close_window_from_other_thread(self):
-        if self.root and self.root.winfo_exists():
-            self.root.after_idle(self.root.destroy)
-
+        if self.root and self.root.winfo_exists(): self.root.after_idle(self.root.destroy)
     def start_loop(self):
         self._create_gui()
         self.root.mainloop()
@@ -294,7 +247,7 @@ def stream_frames(client_socket, stop_event, session_settings):
             monitor = sct.monitors[1]
             while not stop_event.is_set():
                 if not session_settings['screen_streaming_active']:
-                    time.sleep(0.1) # Éviter de boucler trop vite si le streaming est désactivé
+                    time.sleep(0.1)
                     continue
                 sct_img = sct.grab(monitor)
                 header = struct.pack("!II", sct_img.width, sct_img.height)
@@ -307,163 +260,131 @@ def stream_frames(client_socket, stop_event, session_settings):
                 len_info = struct.pack("!I", len(payload))
                 client_socket.sendall(MSG_TYPE_IMAGE + len_info + payload)
                 time.sleep(0.03)
-    except (BrokenPipeError, ConnectionResetError):
-        pass
-    finally:
-        stop_event.set()
+    except (BrokenPipeError, ConnectionResetError): pass
+    finally: stop_event.set()
 
 def get_available_cameras():
-    """
-    Détecte les caméras disponibles sur le système et retourne une liste de leurs indices.
-    """
     available_cameras = []
-    # Essayer jusqu'à un certain nombre de caméras (par exemple, 10)
     for i in range(10):
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW) # Utiliser CAP_DSHOW pour Windows pour une meilleure compatibilité
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
         if cap.isOpened():
-            # Tenter de lire une trame pour s'assurer que la caméra est fonctionnelle
-            ret, frame = cap.read()
-            if ret:
-                available_cameras.append(i)
+            ret, _ = cap.read()
+            if ret: available_cameras.append(i)
             cap.release()
-        else:
-            # Si une caméra n'est pas trouvée, il est probable que les suivantes ne le soient pas non plus
-            # ou qu'il y ait un trou dans les indices. On peut ajuster cette logique si nécessaire.
-            pass
     return available_cameras
 
 def stream_camera_frames(client_socket, stop_event, session_settings, camera_index_ref):
     cap = None
-    current_camera_index = -1 # Track the camera index currently in use by this thread
+    current_camera_index = -1
     try:
         while not stop_event.is_set():
-            # Get the current selected camera index from the shared session settings
             selected_camera_index = camera_index_ref[0]
-
-            # Check if the camera index has changed or if streaming needs to start/stop
             if session_settings['camera_streaming_active'] and current_camera_index != selected_camera_index:
-                if cap:
-                    cap.release()
-                    cap = None
+                if cap: cap.release()
                 current_camera_index = selected_camera_index
-                print(f"[*] Initialisation de la caméra {current_camera_index} pour le streaming.")
+                print(f"[*] Initialisation de la caméra {current_camera_index}...")
                 cap = cv2.VideoCapture(current_camera_index, cv2.CAP_DSHOW)
                 if not cap.isOpened():
-                    print(f"[!] Erreur: Impossible d'ouvrir la caméra {current_camera_index}. Le streaming de cette caméra est désactivé.")
-                    if cap: cap.release()
-                    cap = None
-                    current_camera_index = -1 # Mark as failed
-                    time.sleep(1) # Wait a bit before retrying or checking for new settings
-                    continue
+                    print(f"[!] Erreur: Impossible d'ouvrir la caméra {current_camera_index}.")
+                    cap = None; current_camera_index = -1; time.sleep(1); continue
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             elif not session_settings['camera_streaming_active'] and cap:
-                # If streaming is deactivated, release the camera
-                cap.release()
-                cap = None
-                current_camera_index = -1
-                time.sleep(0.1)
-                continue
-            elif not session_settings['camera_streaming_active'] and not cap:
-                # If streaming is deactivated and camera is already released, just wait
-                time.sleep(0.1)
-                continue
-
-            if cap and session_settings['camera_streaming_active']:
+                cap.release(); cap = None; current_camera_index = -1; time.sleep(0.1); continue
+            elif not session_settings['camera_streaming_active']: time.sleep(0.1); continue
+            if cap:
                 ret, frame = cap.read()
                 if not ret:
-                    print(f"[!] Erreur: Impossible de lire la trame de la caméra {current_camera_index}. Tentative de réinitialisation.")
-                    if cap: cap.release()
-                    cap = None
-                    current_camera_index = -1 # Force re-initialization
-                    time.sleep(1)
-                    continue
-
+                    print(f"[!] Erreur: Impossible de lire la trame de la caméra {current_camera_index}.")
+                    cap.release(); cap = None; current_camera_index = -1; time.sleep(1); continue
                 _, jpeg_bytes = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), session_settings['jpeg_quality']])
-                width = frame.shape[1]
-                height = frame.shape[0]
-                header = struct.pack("!II", width, height)
+                header = struct.pack("!II", frame.shape[1], frame.shape[0])
                 payload = header + jpeg_bytes.tobytes()
                 len_info = struct.pack("!I", len(payload))
                 client_socket.sendall(MSG_TYPE_CAMERA + len_info + payload)
                 time.sleep(0.05)
-            else:
-                time.sleep(0.1) # Wait if no camera is active or selected
-
-    except (BrokenPipeError, ConnectionResetError):
-        pass
-    except Exception as e:
-        print(f"[!] Erreur dans stream_camera_frames: {e}")
+    except (BrokenPipeError, ConnectionResetError): pass
+    except Exception as e: print(f"[!] Erreur dans stream_camera_frames: {e}")
     finally:
-        if cap:
-            cap.release()
+        if cap: cap.release()
         stop_event.set()
 
+def start_bore_tunnel(local_port, tunnel_type, result_queue):
+    """
+    Démarre un tunnel bore pour un port local donné.
+    Place le résultat (adresse, port) ou une erreur dans la queue.
+    """
+    bore_path = resource_path("bore.exe")
+    if not os.path.exists(bore_path):
+        result_queue.put((None, f"bore.exe non trouvé à {bore_path}"))
+        return
+
+    command = [bore_path, "local", str(local_port), "--to", "bore.pub"]
+    process = None
+    try:
+        # Use subprocess.Popen with PIPE for stdout/stderr to capture output
+        # and CREATE_NO_WINDOW to hide the console window on Windows
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        
+        # Read output line by line to find the public address and port
+        public_address = None
+        public_port = None
+        for line in iter(process.stdout.readline, ''):
+            print(f"[BORE {local_port}] {line.strip()}") # For debugging
+            match = re.search(r'listening at (.*):(\d+)', line)
+            if match:
+                public_address = match.group(1)
+                public_port = match.group(2)
+                break # Found the info, stop reading output for this tunnel
+        
+        if public_address and public_port:
+            result_queue.put((public_address, public_port))
+        else:
+            # If process exited or didn't provide expected output
+            stderr_output = process.communicate(timeout=5)[0] # Try to get any remaining output
+            result_queue.put((None, f"bore tunnel failed to start for port {local_port}. Output: {stderr_output}"))
+
+    except FileNotFoundError:
+        result_queue.put((None, f"bore.exe non trouvé à {bore_path}"))
+    except subprocess.TimeoutExpired:
+        if process: process.kill(); process.wait()
+        result_queue.put((None, f"Timeout lors du démarrage du tunnel bore pour le port {local_port}"))
+    except Exception as e:
+        result_queue.put((None, str(e)))
+    finally:
+        # Store the process globally so it can be killed later
+        if process:
+            tunnel_processes[local_port] = process
 
 def handle_client(client_socket, client_address):
     stop_event = threading.Event()
-    session_settings = {
-        'jpeg_quality': 70,
-        'screen_streaming_active': True,
-        'camera_streaming_active': False,
-        'selected_camera_index': [0] # Default to camera 0, using a list to make it mutable across threads
-    }
+    session_settings = {'jpeg_quality': 70, 'screen_streaming_active': True, 'camera_streaming_active': False, 'selected_camera_index': [0]}
     session_data = {'jpeg_quality': 70, 'last_server_clipboard': "", 'last_client_clipboard_received': "", 'last_clipboard_sent_to_client': ""}
     server_chat_window = None
-
-    # Send available cameras to the client upon connection
-    available_cams = get_available_cameras()
-    camera_list_str = json.dumps(available_cams)
-    command_str = f"CAMERA_LIST,{camera_list_str}"
-    command_bytes = command_str.encode('utf-8')
-    len_info = struct.pack("!H", len(command_bytes))
-    try:
-        client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
-    except (BrokenPipeError, ConnectionResetError):
-        print(f"[!] Client {client_address} déconnecté lors de l'envoi de la liste des caméras.")
-        stop_event.set()
-        return
+    send_command_to_client(client_socket, f"CAMERA_LIST,{json.dumps(get_available_cameras())}")
 
     def _notify_chat_window_closed(address):
         nonlocal server_chat_window
         server_chat_window = None
-        if address in active_chat_windows:
-            del active_chat_windows[address]
+        if address in active_chat_windows: del active_chat_windows[address]
 
     processor_thread = threading.Thread(target=command_processor, args=(stop_event,), daemon=True)
     processor_thread.start()
     clipboard_monitor = threading.Thread(target=monitor_and_sync_clipboard, args=(client_socket, stop_event, session_data), daemon=True)
     clipboard_monitor.start()
-
-    # Initialize camera_streamer outside the loop so it can be restarted if camera_index changes
-    camera_streamer_thread = None
-    camera_streamer_stop_event = threading.Event() # A separate stop event for the camera streamer
+    camera_streamer_thread, camera_streamer_stop_event = None, threading.Event()
 
     def start_camera_streamer():
         nonlocal camera_streamer_thread, camera_streamer_stop_event
-        # Stop the existing camera streamer if it's running
         if camera_streamer_thread and camera_streamer_thread.is_alive():
-            camera_streamer_stop_event.set()
-            camera_streamer_thread.join(timeout=1) # Wait for it to stop
-            if camera_streamer_thread.is_alive():
-                print("[!] Avertissement: Le thread de la caméra n'a pas pu s'arrêter à temps.")
-        
-        # Create a new stop event for the new thread
+            camera_streamer_stop_event.set(); camera_streamer_thread.join(timeout=1)
         camera_streamer_stop_event = threading.Event()
-        camera_streamer_thread = threading.Thread(
-            target=stream_camera_frames,
-            args=(client_socket, camera_streamer_stop_event, session_settings, session_settings['selected_camera_index']),
-            daemon=True
-        )
+        camera_streamer_thread = threading.Thread(target=stream_camera_frames, args=(client_socket, camera_streamer_stop_event, session_settings, session_settings['selected_camera_index']), daemon=True)
         camera_streamer_thread.start()
-        print(f"[*] Thread de streaming caméra démarré pour la caméra {session_settings['selected_camera_index'][0]}.")
-
-    # Start the camera streamer initially with the default camera
     start_camera_streamer()
 
-
     def _receive_and_process_client_messages():
-        nonlocal server_chat_window, camera_streamer_thread, camera_streamer_stop_event
+        nonlocal server_chat_window
         try:
             while not stop_event.is_set():
                 msg_type_byte = recv_all(client_socket, 1)
@@ -476,93 +397,79 @@ def handle_client(client_socket, client_address):
                     if not command_data: break
                     command = command_data.decode('utf-8')
                     parts = command.split(',', 1)
-                    cmd_type = parts[0]
-                    value_str = parts[1] if len(parts) > 1 else ""
-                    if cmd_type == 'QUALITY':
-                        session_settings['jpeg_quality'] = int(value_str)
-                    elif cmd_type == 'MV':
-                        x, y = value_str.split(',')
-                        command_queue.put(('MV', (int(x), int(y))))
-                    elif cmd_type == 'MC':
-                        btn, pressed = value_str.split(',')
-                        command_queue.put(('MC', (btn, int(pressed))))
-                    elif cmd_type == 'CLICK' or cmd_type == 'DBLCLICK':
-                        x, y, btn = value_str.split(',')
-                        command_queue.put((cmd_type, (int(x), int(y), btn)))
-                    elif cmd_type == 'SCROLL':
-                        x_offset, y_offset = value_str.split(',')
-                        command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
-                    elif cmd_type in ('KP', 'KR'):
-                        command_queue.put((cmd_type, value_str))
-                    elif cmd_type == 'CLIPBOARD_DATA':
-                        content = value_str
+                    cmd_type, value_str = parts[0], parts[1] if len(parts) > 1 else ""
+                    
+                    if cmd_type == 'GENERATE_SHARE_CODE':
+                        main_q, file_q = Queue(), Queue()
+                        
+                        # Start tunnels for both main and file transfer ports
+                        main_tunnel_thread = threading.Thread(target=start_bore_tunnel, args=(1981, "main", main_q), daemon=True)
+                        file_tunnel_thread = threading.Thread(target=start_bore_tunnel, args=(1980, "file", file_q), daemon=True)
+                        
+                        main_tunnel_thread.start()
+                        file_tunnel_thread.start()
+
+                        main_info, file_info = None, None
                         try:
-                            pyperclip.copy(content)
-                            session_data['last_server_clipboard'] = content
-                            session_data['last_client_clipboard_received'] = content
-                        except Exception as e:
-                            print(f"[!] Erreur lors de la mise à jour du presse-papiers serveur pour {client_address}: {e}")
+                            main_info = main_q.get(timeout=20) # Increased timeout
+                            file_info = file_q.get(timeout=20) # Increased timeout
+                        except Empty:
+                            send_command_to_client(client_socket, "SHARE_INFO_ERROR,Timeout lors de la création des tunnels.")
+                            continue
+
+                        main_address, main_port = main_info
+                        file_address, file_port = file_info
+
+                        if main_address and file_address:
+                            send_command_to_client(client_socket, f"SHARE_INFO_GENERATED,{main_address},{main_port},{file_address},{file_port}")
+                        else:
+                            error_msg = main_port if not main_address else file_port
+                            send_command_to_client(client_socket, f"SHARE_INFO_ERROR,{error_msg}")
+                        continue
+
+                    if cmd_type == 'QUALITY': session_settings['jpeg_quality'] = int(value_str)
+                    elif cmd_type == 'MV': x, y = value_str.split(','); command_queue.put(('MV', (int(x), int(y))))
+                    elif cmd_type == 'MC': btn, pressed = value_str.split(','); command_queue.put(('MC', (btn, int(pressed))))
+                    elif cmd_type in ('CLICK', 'DBLCLICK'): x, y, btn = value_str.split(','); command_queue.put((cmd_type, (int(x), int(y), btn)))
+                    elif cmd_type == 'SCROLL': x_offset, y_offset = value_str.split(','); command_queue.put((cmd_type, (int(x_offset), int(y_offset))))
+                    elif cmd_type in ('KP', 'KR'): command_queue.put((cmd_type, value_str))
+                    elif cmd_type == 'CLIPBOARD_DATA':
+                        try:
+                            pyperclip.copy(value_str)
+                            session_data['last_server_clipboard'] = value_str
+                            session_data['last_client_clipboard_received'] = value_str
+                        except Exception as e: print(f"[!] Erreur presse-papiers: {e}")
                     elif cmd_type == 'CHAT_MESSAGE':
                         if server_chat_window is None:
                             server_chat_window = ServerChatWindow(client_socket, client_address, stop_event, _notify_chat_window_closed)
                             active_chat_windows[client_address] = server_chat_window
-                            chat_window_thread = threading.Thread(target=server_chat_window.start_loop, daemon=True)
-                            chat_window_thread.start()
+                            threading.Thread(target=server_chat_window.start_loop, daemon=True).start()
                             time.sleep(0.2)
-                            server_chat_window.add_message("Client", value_str)
-                        else:
-                            server_chat_window.add_message("Client", value_str)
-                    elif cmd_type == 'START_CAMERA':
-                        session_settings['camera_streaming_active'] = True
-                        print(f"[*] Démarrage du streaming caméra pour {client_address}")
-                    elif cmd_type == 'STOP_CAMERA':
-                        session_settings['camera_streaming_active'] = False
-                        print(f"[*] Arrêt du streaming caméra pour {client_address}")
+                        server_chat_window.add_message("Client", value_str)
+                    elif cmd_type == 'START_CAMERA': session_settings['camera_streaming_active'] = True
+                    elif cmd_type == 'STOP_CAMERA': session_settings['camera_streaming_active'] = False
                     elif cmd_type == 'SELECT_CAMERA':
                         try:
-                            new_camera_index = int(value_str)
-                            if new_camera_index != session_settings['selected_camera_index'][0]:
-                                session_settings['selected_camera_index'][0] = new_camera_index
-                                print(f"[*] Client {client_address} a sélectionné la caméra {new_camera_index}.")
-                                # Restart the camera streamer with the new index
+                            new_idx = int(value_str)
+                            if new_idx != session_settings['selected_camera_index'][0]:
+                                session_settings['selected_camera_index'][0] = new_idx
                                 start_camera_streamer()
-                            else:
-                                print(f"[*] Caméra {new_camera_index} déjà sélectionnée pour {client_address}.")
-                        except ValueError:
-                            print(f"[!] Commande SELECT_CAMERA invalide: {value_str}")
-                    elif cmd_type == 'START_SCREEN':
-                        session_settings['screen_streaming_active'] = True
-                        print(f"[*] Démarrage du streaming écran pour {client_address}")
-                    elif cmd_type == 'STOP_SCREEN':
-                        session_settings['screen_streaming_active'] = False
-                        print(f"[*] Arrêt du streaming écran pour {client_address}")
-                    else:
-                        pass
-                elif msg_type_byte == MSG_TYPE_IMAGE or msg_type_byte == MSG_TYPE_CAMERA: # Gérer les messages image/caméra si le client en envoie (peu probable ici)
-                    len_info = recv_all(client_socket, 4)
-                    if len_info:
-                        payload_size = struct.unpack("!I", len_info)[0]
-                        recv_all(client_socket, payload_size) # Lire et ignorer le payload
-                    else:
-                        break
-                else:
-                    break
+                        except ValueError: print(f"[!] Commande SELECT_CAMERA invalide: {value_str}")
+                    elif cmd_type == 'START_SCREEN': session_settings['screen_streaming_active'] = True
+                    elif cmd_type == 'STOP_SCREEN': session_settings['screen_streaming_active'] = False
+                else: break
         finally:
             stop_event.set()
-            camera_streamer_stop_event.set() # Ensure camera streamer also stops
+            camera_streamer_stop_event.set()
             if server_chat_window:
                 server_chat_window.add_message("Système", "Client déconnecté.")
                 server_chat_window.close_window_from_other_thread()
-            if client_address in active_chat_windows:
-                del active_chat_windows[client_address]
+            if client_address in active_chat_windows: del active_chat_windows[client_address]
 
     receiver = threading.Thread(target=_receive_and_process_client_messages, daemon=True)
     streamer = threading.Thread(target=stream_frames, args=(client_socket, stop_event, session_settings), daemon=True)
-
     receiver.start()
     streamer.start()
-    # camera_streamer is started by start_camera_streamer()
-
     stop_event.wait()
     print(f"[-] Client {client_address} déconnecté.")
     client_socket.close()
@@ -577,13 +484,11 @@ def get_system_info():
         ram = psutil.virtual_memory()
         sys_info["ram"] = {"total": ram.total, "used": ram.used, "percent": ram.percent}
         partitions_info = []
-        partitions = psutil.disk_partitions()
-        for p in partitions:
+        for p in psutil.disk_partitions():
             try:
                 usage = psutil.disk_usage(p.mountpoint)
                 partitions_info.append({"device": p.device, "mountpoint": p.mountpoint, "total": usage.total, "used": usage.used, "percent": usage.percent})
-            except (PermissionError, FileNotFoundError):
-                continue
+            except (PermissionError, FileNotFoundError): continue
         sys_info["disks"] = partitions_info
         return sys_info
     except Exception as e:
@@ -604,8 +509,7 @@ def get_available_drives():
     drives = []
     bitmask = ctypes.windll.kernel32.GetLogicalDrives()
     for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-        if bitmask & 1:
-            drives.append(f"{letter}:\\")
+        if bitmask & 1: drives.append(f"{letter}:\\")
         bitmask >>= 1
     return drives
 
@@ -625,8 +529,7 @@ def handle_file_transfer(client_socket):
             filename = os.path.basename(filename)
             downloads_path = get_downloads_folder()
             reception_path = os.path.join(downloads_path, "Hosanna Tv Reception")
-            if not os.path.exists(reception_path):
-                os.makedirs(reception_path)
+            if not os.path.exists(reception_path): os.makedirs(reception_path)
             save_path = os.path.join(reception_path, filename)
             print(f"[*] Réception de '{filename}'...")
             bytes_received = 0
@@ -636,20 +539,15 @@ def handle_file_transfer(client_socket):
                     while bytes_received < filesize:
                         chunk_size = min(65536, filesize - bytes_received)
                         chunk = recv_all(client_socket, chunk_size)
-                        if not chunk:
-                            interrupted = True
-                            break
+                        if not chunk: interrupted = True; break
                         f.write(chunk)
                         bytes_received += len(chunk)
-            except Exception as e:
-                interrupted = True
-                print(f"[!] Erreur pendant l'écriture du fichier {filename}: {e}")
+            except Exception as e: interrupted = True; print(f"[!] Erreur écriture fichier: {e}")
             if interrupted:
                 print(f"[!] Transfert de '{filename}' interrompu.")
-                if os.path.exists(save_path):
-                    os.remove(save_path)
+                if os.path.exists(save_path): os.remove(save_path)
             elif bytes_received == filesize:
-                print(f"[*] Fichier '{filename}' reçu avec succès.")
+                print(f"[*] Fichier '{filename}' reçu.")
                 client_socket.sendall(b"OK")
         elif command == 'LIST_DIR':
             req_path = parts[1]
@@ -658,18 +556,15 @@ def handle_file_transfer(client_socket):
                 entries = [{'name': d, 'is_dir': True, 'size': 0} for d in get_available_drives()]
                 response_data = json.dumps({'path': '', 'entries': entries}).encode('utf-8')
             else:
-                entries = []
-                error_msg = None
+                entries, error_msg = [], None
                 try:
                     for entry in os.scandir(req_path):
                         try:
                             is_dir = entry.is_dir()
                             size = 0 if is_dir else entry.stat().st_size
                             entries.append({'name': entry.name, 'is_dir': is_dir, 'size': size})
-                        except (OSError, PermissionError):
-                            continue
-                except (OSError, PermissionError):
-                    error_msg = "Accès refusé"
+                        except (OSError, PermissionError): continue
+                except (OSError, PermissionError): error_msg = "Accès refusé"
                 entries.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
                 response_dict = {'path': req_path, 'entries': entries, 'error': error_msg}
                 response_data = json.dumps(response_dict).encode('utf-8')
@@ -678,8 +573,7 @@ def handle_file_transfer(client_socket):
                 client_socket.sendall(len_prefix + response_data)
         elif command == 'DOWNLOAD':
             req_path = parts[1]
-            if not os.path.isfile(req_path):
-                client_socket.sendall(struct.pack("!Q", 0))
+            if not os.path.isfile(req_path): client_socket.sendall(struct.pack("!Q", 0))
             else:
                 try:
                     filesize = os.path.getsize(req_path)
@@ -691,19 +585,15 @@ def handle_file_transfer(client_socket):
                             if not chunk: break
                             client_socket.sendall(chunk)
                     print(f"[*] Envoi de '{req_path}' terminé.")
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-                except Exception as e:
-                    print(f"[!] Erreur pendant l'envoi du fichier '{req_path}': {e}")
+                except (BrokenPipeError, ConnectionResetError): pass
+                except Exception as e: print(f"[!] Erreur envoi fichier: {e}")
         elif command == 'GET_SYS_INFO':
             info = get_system_info()
             response_data = json.dumps(info).encode('utf-8')
             len_prefix = struct.pack("!I", len(response_data))
             client_socket.sendall(len_prefix + response_data)
-    except Exception as e:
-        print(f"[!!!] ERREUR CRITIQUE transfert: {e}", file=sys.stderr)
-    finally:
-        client_socket.close()
+    except Exception as e: print(f"[!!!] ERREUR CRITIQUE transfert: {e}", file=sys.stderr)
+    finally: client_socket.close()
 
 def file_server(host, port, context):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -716,9 +606,7 @@ def file_server(host, port, context):
             client, addr = server_socket.accept()
             ssl_socket = context.wrap_socket(client, server_side=True)
             threading.Thread(target=handle_file_transfer, args=(ssl_socket,), daemon=True).start()
-        except Exception as e:
-            print(f"[!] Erreur sur le serveur de fichiers: {e}")
-            break
+        except Exception as e: print(f"[!] Erreur serveur de fichiers: {e}"); break
 
 def discovery_service(discovery_port):
     discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -728,34 +616,22 @@ def discovery_service(discovery_port):
     while True:
         try:
             message, client_address = discovery_socket.recvfrom(1024)
-            message = message.decode('utf-8')
-            if message == "HOSANNA_REMOTE_DISCOVERY_REQUEST":
-                response = "HOSANNA_REMOTE_DISCOVERY_RESPONSE".encode('utf-8')
-                discovery_socket.sendto(response, client_address)
-        except Exception as e:
-            print(f"[!] Erreur dans le service de découverte: {e}")
-            break
+            if message.decode('utf-8') == "HOSANNA_REMOTE_DISCOVERY_REQUEST":
+                discovery_socket.sendto(b"HOSANNA_REMOTE_DISCOVERY_RESPONSE", client_address)
+        except Exception as e: print(f"[!] Erreur découverte: {e}"); break
 
 def main():
     base_path = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-    cert_path = os.path.join(base_path, "cert.pem")
-    key_path = os.path.join(base_path, "key.pem")
+    cert_path, key_path = os.path.join(base_path, "cert.pem"), os.path.join(base_path, "key.pem")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     try:
         context.load_cert_chain(certfile=cert_path, keyfile=key_path)
     except FileNotFoundError:
-        print(f"[ERREUR] cert.pem ou key.pem non trouvé.")
-        input("Appuyez sur Entrée pour quitter...")
-        return
+        print("[ERREUR] cert.pem ou key.pem non trouvé."); input("Appuyez sur Entrée..."); return
 
-    main_port = 1981
-    file_port = main_port - 1
-    discovery_port = 9998
-
-    discovery_thread = threading.Thread(target=discovery_service, args=(discovery_port,), daemon=True)
-    discovery_thread.start()
-    file_server_thread = threading.Thread(target=file_server, args=('0.0.0.0', file_port, context), daemon=True)
-    file_server_thread.start()
+    main_port, file_port, discovery_port = 1981, 1980, 9998
+    threading.Thread(target=discovery_service, args=(discovery_port,), daemon=True).start()
+    threading.Thread(target=file_server, args=('0.0.0.0', file_port, context), daemon=True).start()
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -768,9 +644,14 @@ def main():
             print(f"[*] Connexion acceptée de {addr[0]}:{addr[1]}")
             ssl_socket = context.wrap_socket(client, server_side=True)
             threading.Thread(target=handle_client, args=(ssl_socket, addr), daemon=True).start()
-    except KeyboardInterrupt:
-        print("\n[*] Serveur arrêté.")
+    except KeyboardInterrupt: print("\n[*] Serveur arrêté.")
     finally:
+        global tunnel_processes
+        for port, process in tunnel_processes.items():
+            if process and process.poll() is None: # If process is still running
+                print(f"[*] Arrêt du tunnel bore pour le port {port}...")
+                process.kill()
+                process.wait()
         server_socket.close()
 
 if __name__ == '__main__':
