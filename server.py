@@ -51,7 +51,11 @@ KEY_MAP = {
 }
 
 command_queue = Queue()
-tunnel_processes = {} # Store multiple tunnel processes
+# Global storage for active bore tunnel info
+active_bore_tunnels_info = {
+    'main': {'process': None, 'address': None, 'port': None},
+    'file': {'process': None, 'address': None, 'port': None}
+}
 
 def command_processor(stop_event):
     mouse_ctrl = MouseController()
@@ -103,9 +107,10 @@ def recv_all(sock, n):
             packet = sock.recv(n - len(data))
             if not packet: return None
             data.extend(packet)
-        except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
-            continue
-        except (ConnectionResetError, BrokenPipeError):
+        except (ssl.SSLWantReadError, ssl.SSLWantWriteError, ssl.SSLEOFError, ConnectionResetError, BrokenPipeError):
+            return None # Indicate connection error or closure
+        except Exception as e:
+            print(f"[!] Erreur inattendue lors de la réception: {e}")
             return None
     return data
 
@@ -119,10 +124,13 @@ def send_command_to_client(client_socket, command_str):
         command_bytes = command_str.encode('utf-8')
         len_info = struct.pack("!H", len(command_bytes))
         client_socket.sendall(MSG_TYPE_COMMAND + len_info + command_bytes)
-    except (BrokenPipeError, ConnectionResetError):
-        print("[!] Client déconnecté lors de l'envoi de la commande.")
+    except (ssl.SSLWantReadError, ssl.SSLWantWriteError, ssl.SSLEOFError, ConnectionResetError, BrokenPipeError) as e:
+        print(f"[!] Client déconnecté ou erreur SSL lors de l'envoi de la commande: {e}")
+        return False
     except Exception as e:
-        print(f"[!] Erreur lors de l'envoi de la commande au client: {e}")
+        print(f"[!] Erreur inattendue lors de l'envoi de la commande au client: {e}")
+        return False
+    return True
 
 def send_chat_message_to_client(client_socket, message):
     send_command_to_client(client_socket, f"CHAT_MESSAGE_FROM_SERVER,{message}")
@@ -155,24 +163,19 @@ class ServerChatWindow:
         self.client_address = client_address
         self.stop_event_client_handler = stop_event_client_handler
         self.on_window_closed_callback = on_window_closed_callback
-        self.root = None
-        self.chat_history = None
-        self.message_input = None
-        self.send_button = None
-        self.message_var = None
-        self.message_queue = Queue()
-        self._offset_x = 0
-        self._offset_y = 0
-
-    def _create_gui(self):
         self.root = tk.Tk()
-        self.root.overrideredirect(True)
+        self.root.withdraw() # Hide the main Tkinter window
+        self.chat_window = tk.Toplevel(self.root) # Create a Toplevel window instead
+        self.chat_window.overrideredirect(True)
+        self.chat_window.protocol("WM_DELETE_WINDOW", self._on_closing) # Handle closing
+
         window_width, window_height = 1000, 800
-        screen_width, screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        screen_width, screen_height = self.chat_window.winfo_screenwidth(), self.chat_window.winfo_screenheight()
         center_x, center_y = int(screen_width/2 - window_width / 2), int(screen_height/2 - window_height / 2)
-        self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
-        self.root.attributes("-topmost", True)
-        main_frame = tk.Frame(self.root, highlightbackground="gray", highlightcolor="gray", highlightthickness=1)
+        self.chat_window.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+        self.chat_window.attributes("-topmost", True)
+
+        main_frame = tk.Frame(self.chat_window, highlightbackground="gray", highlightcolor="gray", highlightthickness=1)
         main_frame.pack(fill=tk.BOTH, expand=True)
         title_bar = tk.Frame(main_frame, bg='gray', relief='raised', bd=0)
         title_bar.pack(expand=False, fill='x')
@@ -183,7 +186,7 @@ class ServerChatWindow:
         title_label.bind("<ButtonPress-1>", self._on_press)
         title_label.bind("<B1-Motion>", self._on_drag)
         try:
-            self.root.iconbitmap(resource_path("logo_-hosanna-tv-copie.ico"))
+            self.chat_window.iconbitmap(resource_path("logo_-hosanna-tv-copie.ico"))
         except Exception as e:
             print(f"[!] Erreur lors du chargement de l'icône: {e}")
         self.chat_history = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD, state='disabled', font=("Arial", 10))
@@ -202,12 +205,11 @@ class ServerChatWindow:
         close_button.pack(side=tk.RIGHT, padx=(5, 0))
         self.send_button = tk.Button(input_frame, text="Envoyer", command=self._send_message_from_gui, font=("Arial", 10), state='disabled')
         self.send_button.pack(side=tk.RIGHT, padx=(5, 5))
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
-        self.root.grab_set_global()
-        self.root.after(100, self._check_message_queue)
+        self.chat_window.grab_set_global()
+        self.chat_window.after(100, self._check_message_queue)
 
     def _on_press(self, event): self._offset_x, self._offset_y = event.x, event.y
-    def _on_drag(self, event): self.root.geometry(f"+{self.root.winfo_pointerx() - self._offset_x}+{self.root.winfo_pointery() - self._offset_y}")
+    def _on_drag(self, event): self.chat_window.geometry(f"+{self.chat_window.winfo_pointerx() - self._offset_x}+{self.chat_window.winfo_pointery() - self._offset_y}")
     def _update_send_button_state(self, *args): self.send_button.config(state='normal' if self.message_var.get().strip() else 'disabled')
     def _check_message_queue(self):
         try:
@@ -216,14 +218,14 @@ class ServerChatWindow:
                 self._add_message_to_history(sender, message)
         except Empty: pass
         finally:
-            if self.root and self.root.winfo_exists(): self.root.after(100, self._check_message_queue)
+            if self.chat_window and self.chat_window.winfo_exists(): self.chat_window.after(100, self._check_message_queue)
     def _add_message_to_history(self, sender, message):
         self.chat_history.config(state='normal')
         self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {sender}: {message}\n", sender.lower())
         self.chat_history.config(state='disabled')
         self.chat_history.see(tk.END)
     def add_message(self, sender, message):
-        if self.root and self.root.winfo_exists(): self.message_queue.put((sender, message))
+        if self.chat_window and self.chat_window.winfo_exists(): self.message_queue.put((sender, message))
     def _send_message_from_gui(self, event=None):
         message = self.message_input.get().strip()
         if message:
@@ -232,13 +234,14 @@ class ServerChatWindow:
             self.message_input.delete(0, tk.END)
     def _on_closing(self):
         send_chat_message_to_client(self.client_socket, "L'utilisateur a fermé la fenêtre de chat. Envoyez un nouveau message pour la rouvrir.")
-        self.root.grab_release()
-        self.root.destroy()
+        self.chat_window.grab_release()
+        self.chat_window.destroy()
+        self.root.destroy() # Destroy the hidden root window as well
         if self.on_window_closed_callback: self.on_window_closed_callback(self.client_address)
     def close_window_from_other_thread(self):
+        if self.chat_window and self.chat_window.winfo_exists(): self.chat_window.after_idle(self.chat_window.destroy)
         if self.root and self.root.winfo_exists(): self.root.after_idle(self.root.destroy)
     def start_loop(self):
-        self._create_gui()
         self.root.mainloop()
 
 def stream_frames(client_socket, stop_event, session_settings):
@@ -258,7 +261,11 @@ def stream_frames(client_socket, stop_event, session_settings):
                 jpeg_bytes = buffer.getvalue()
                 payload = header + jpeg_bytes
                 len_info = struct.pack("!I", len(payload))
-                client_socket.sendall(MSG_TYPE_IMAGE + len_info + payload)
+                try:
+                    client_socket.sendall(MSG_TYPE_IMAGE + len_info + payload)
+                except (ssl.SSLWantReadError, ssl.SSLWantWriteError, ssl.SSLEOFError, ConnectionResetError, BrokenPipeError) as e:
+                    print(f"[!] Client déconnecté ou erreur SSL lors de l'envoi de l'image: {e}")
+                    break # Break if send fails
                 time.sleep(0.03)
     except (BrokenPipeError, ConnectionResetError): pass
     finally: stop_event.set()
@@ -301,7 +308,11 @@ def stream_camera_frames(client_socket, stop_event, session_settings, camera_ind
                 header = struct.pack("!II", frame.shape[1], frame.shape[0])
                 payload = header + jpeg_bytes.tobytes()
                 len_info = struct.pack("!I", len(payload))
-                client_socket.sendall(MSG_TYPE_CAMERA + len_info + payload)
+                try:
+                    client_socket.sendall(MSG_TYPE_CAMERA + len_info + payload)
+                except (ssl.SSLWantReadError, ssl.SSLWantWriteError, ssl.SSLEOFError, ConnectionResetError, BrokenPipeError) as e:
+                    print(f"[!] Client déconnecté ou erreur SSL lors de l'envoi de la caméra: {e}")
+                    break # Break if send fails
                 time.sleep(0.05)
     except (BrokenPipeError, ConnectionResetError): pass
     except Exception as e: print(f"[!] Erreur dans stream_camera_frames: {e}")
@@ -354,14 +365,29 @@ def start_bore_tunnel(local_port, tunnel_type, result_queue):
     finally:
         # Store the process globally so it can be killed later
         if process:
-            tunnel_processes[local_port] = process
+            global active_bore_tunnels_info
+            active_bore_tunnels_info[tunnel_type]['process'] = process
+            active_bore_tunnels_info[tunnel_type]['address'] = public_address
+            active_bore_tunnels_info[tunnel_type]['port'] = public_port
 
 def handle_client(client_socket, client_address):
     stop_event = threading.Event()
     session_settings = {'jpeg_quality': 70, 'screen_streaming_active': True, 'camera_streaming_active': False, 'selected_camera_index': [0]}
     session_data = {'jpeg_quality': 70, 'last_server_clipboard': "", 'last_client_clipboard_received': "", 'last_clipboard_sent_to_client': ""}
     server_chat_window = None
-    send_command_to_client(client_socket, f"CAMERA_LIST,{json.dumps(get_available_cameras())}")
+    
+    # Send camera list
+    if not send_command_to_client(client_socket, f"CAMERA_LIST,{json.dumps(get_available_cameras())}"):
+        stop_event.set()
+        return
+
+    # Send file tunnel info immediately after connection if available
+    global active_bore_tunnels_info
+    if active_bore_tunnels_info['file']['address'] and active_bore_tunnels_info['file']['port']:
+        if not send_command_to_client(client_socket, f"FILE_TUNNEL_INFO,{active_bore_tunnels_info['file']['address']},{active_bore_tunnels_info['file']['port']}"):
+            stop_event.set()
+            return
+
 
     def _notify_chat_window_closed(address):
         nonlocal server_chat_window
@@ -402,6 +428,15 @@ def handle_client(client_socket, client_address):
                     if cmd_type == 'GENERATE_SHARE_CODE':
                         main_q, file_q = Queue(), Queue()
                         
+                        # Check if tunnels are already active
+                        if active_bore_tunnels_info['main']['address'] and active_bore_tunnels_info['file']['address']:
+                            main_address = active_bore_tunnels_info['main']['address']
+                            main_port = active_bore_tunnels_info['main']['port']
+                            file_address = active_bore_tunnels_info['file']['address']
+                            file_port = active_bore_tunnels_info['file']['port']
+                            send_command_to_client(client_socket, f"SHARE_INFO_GENERATED,{main_address},{main_port},{file_address},{file_port}")
+                            continue
+
                         # Start tunnels for both main and file transfer ports
                         main_tunnel_thread = threading.Thread(target=start_bore_tunnel, args=(1981, "main", main_q), daemon=True)
                         file_tunnel_thread = threading.Thread(target=start_bore_tunnel, args=(1980, "file", file_q), daemon=True)
@@ -421,6 +456,7 @@ def handle_client(client_socket, client_address):
                         file_address, file_port = file_info
 
                         if main_address and file_address:
+                            # Send all tunnel info to the client
                             send_command_to_client(client_socket, f"SHARE_INFO_GENERATED,{main_address},{main_port},{file_address},{file_port}")
                         else:
                             error_msg = main_port if not main_address else file_port
@@ -646,10 +682,11 @@ def main():
             threading.Thread(target=handle_client, args=(ssl_socket, addr), daemon=True).start()
     except KeyboardInterrupt: print("\n[*] Serveur arrêté.")
     finally:
-        global tunnel_processes
-        for port, process in tunnel_processes.items():
+        global active_bore_tunnels_info
+        for tunnel_type in active_bore_tunnels_info:
+            process = active_bore_tunnels_info[tunnel_type]['process']
             if process and process.poll() is None: # If process is still running
-                print(f"[*] Arrêt du tunnel bore pour le port {port}...")
+                print(f"[*] Arrêt du tunnel bore ({tunnel_type})...")
                 process.kill()
                 process.wait()
         server_socket.close()

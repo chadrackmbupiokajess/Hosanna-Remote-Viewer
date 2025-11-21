@@ -855,8 +855,11 @@ class RemoteViewerApp(App):
     def _get_file_transfer_address(self):
         # If file_server_address is set (remote connection), use it
         if self.file_server_address:
-            return self.file_server_address
+            return self.file_server_address[0], self.file_server_address[1]
         # Otherwise, use the local IP/Port from the input fields
+        if self.main_server_address: # If main_server_address is set (local connection)
+            return self.main_server_address[0], self.main_server_address[1] - 1
+        # Fallback if no connection info is available (shouldn't happen if connected)
         return self.ip_input.text, int(self.port_input.text) - 1
 
     def _request_sys_info_thread(self): threading.Thread(target=self._get_sys_info_from_server, daemon=True).start()
@@ -1084,7 +1087,10 @@ class RemoteViewerApp(App):
 
     def send_quality_setting(self, quality_value):
         if self.remote_widget.client_socket:
-            self.remote_widget.send_command(f"QUALITY,{quality_value}")
+            try:
+                self.remote_widget.send_command(f"QUALITY,{quality_value}")
+            except Exception as e:
+                print(f"[!] Erreur lors de l'envoi de la qualité: {e}")
 
     def send_clipboard_to_server(self, content):
         if self.remote_widget.client_socket:
@@ -1203,23 +1209,19 @@ class RemoteViewerApp(App):
             self.remote_widget.send_command("GENERATE_SHARE_CODE")
             self.status_label.text = "Génération des informations de partage..."
 
-    def show_share_code_popup(self, main_address, main_port, file_address, file_port):
+    def show_share_code_popup(self, main_address, main_port): # Simplified to show only main info
         content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         title = 'Informations de Partage'
         
-        main_addr_label = Label(text=f"[b]Adresse principale:[/b] {main_address}", markup=True, font_size='16sp')
-        main_port_label = Label(text=f"[b]Port principal:[/b] {main_port}", markup=True, font_size='16sp')
-        file_addr_label = Label(text=f"[b]Adresse fichiers:[/b] {file_address}", markup=True, font_size='16sp')
-        file_port_label = Label(text=f"[b]Port fichiers:[/b] {file_port}", markup=True, font_size='16sp')
+        main_addr_label = Label(text=f"[b]Adresse:[/b] {main_address}", markup=True, font_size='20sp')
+        main_port_label = Label(text=f"[b]Port:[/b] {main_port}", markup=True, font_size='20sp')
         info_label = Label(text="Communiquez ces informations à l'utilisateur distant.", text_size=(dp(350), None), halign='center')
         
         content.add_widget(main_addr_label)
         content.add_widget(main_port_label)
-        content.add_widget(file_addr_label)
-        content.add_widget(file_port_label)
         content.add_widget(info_label)
         
-        popup = Popup(title=title, content=content, size_hint=(None, None), size=(dp(400), dp(300)))
+        popup = Popup(title=title, content=content, size_hint=(None, None), size=(dp(400), dp(220)))
         popup.open()
 
     def receive_frames(self, host, port):
@@ -1284,13 +1286,20 @@ class RemoteViewerApp(App):
                             if len(share_parts) == 4:
                                 main_addr, main_p, file_addr, file_p = share_parts
                                 self.main_server_address = (main_addr, int(main_p))
-                                self.file_server_address = (file_addr, int(file_p))
-                                Clock.schedule_once(lambda dt: self.show_share_code_popup(main_addr, main_p, file_addr, file_p))
+                                self.file_server_address = (file_addr, int(file_p)) # Store file tunnel info
+                                Clock.schedule_once(lambda dt: self.show_share_code_popup(main_addr, main_p)) # Only show main info
                             else:
                                 print(f"[!] Erreur: Format SHARE_INFO_GENERATED inattendu: {value_str}")
                                 Clock.schedule_once(lambda dt: self.show_connection_error("Erreur de partage: Format de données invalide."))
                         elif cmd_type == 'SHARE_INFO_ERROR':
                             self.show_connection_error(f"Erreur de partage: {value_str}")
+                        elif cmd_type == 'FILE_TUNNEL_INFO': # New command to receive file tunnel info
+                            file_addr, file_p = value_str.split(',')
+                            self.file_server_address = (file_addr, int(file_p))
+                            print(f"[*] Reçu les infos du tunnel de fichiers: {self.file_server_address}")
+                            # If we are already on the remote screen, we might need to refresh file browser
+                            if self.sm.current == 'remote':
+                                Clock.schedule_once(lambda dt: self.list_remote_dir(self.current_remote_path))
                         elif cmd_type == 'CLIPBOARD_UPDATE':
                             content = value_str
                             try:
@@ -1309,7 +1318,9 @@ class RemoteViewerApp(App):
                                 print(f"[!] Erreur de décodage de la liste des caméras: {e}")
                         else: pass
                     else: break
-                except (ConnectionResetError, BrokenPipeError): break
+                except (ConnectionResetError, BrokenPipeError, ssl.SSLEOFError) as e:
+                    print(f"[!] Connexion interrompue: {e}")
+                    break
                 except Exception as e: print(f"[!] Erreur inattendue dans receive_frames: {e}"); break
             if self.remote_widget.client_socket:
                 self.remote_widget.client_socket.close()
@@ -1356,7 +1367,9 @@ class RemoteViewerApp(App):
                 packet = sock.recv(n - len(data))
                 if not packet: return None
                 data.extend(packet)
-            except (socket.error, AttributeError): return None
+            except (socket.error, AttributeError, ssl.SSLEOFError) as e:
+                print(f"[!] Erreur lors de la réception des données: {e}")
+                return None
         return data
 
     def update_image(self, jpeg_bytes):
