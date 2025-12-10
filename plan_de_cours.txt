@@ -1,0 +1,322 @@
+**Plan de Formation : Utilisation de Hosanna Remote pour la Régie de Soyo**
+
+**Objectif de la formation :** Former l'équipe technique de la régie de Soyo à l'utilisation de l'outil Hosanna Remote pour permettre des interventions de maintenance et de support à distance de manière efficace et sécurisée.
+
+---
+
+#### **Module 1 : Prise en Main de Hosanna Remote**
+
+*   **1.1. Objectif de l'Outil pour la Régie**
+*   **1.2. Nos Fonctionnalités Essentielles**
+*   **1.3. Les Composants de la Solution**
+
+#### **Module 2 : Les Concepts Techniques Simplifiés**
+
+*   **2.1. Le Modèle Client-Serveur**
+*   **2.2. Le Protocole de Communication : TCP**
+*   **2.3. La Sécurité : Le Chiffrement SSL/TLS**
+*   **2.4. La Capture d'Écran : Le Format JPEG**
+
+#### **Module 3 : Procédure de Connexion Locale (pour l'Opérateur à Soyo)**
+
+*   **3.1. Lancement du Serveur sur la machine de la régie.**
+*   **3.2. Lancement du Client sur le poste de l'opérateur.**
+*   **3.3. Se connecter en utilisant l'onglet "Connexion Locale"**
+
+#### **Module 4 : Procédure de Partage d'Accès pour une Intervention Distante**
+
+*   **4.1. Le Principe du Tunnel**
+*   **4.2. Étape par étape pour l'Opérateur Local**
+*   **4.3. Étape par étape pour le Technicien Distant**
+
+#### **Module 5 : Utilisation des Outils de Maintenance**
+
+*   **5.1. Navigation et Transfert de Fichiers**
+*   **5.2. Diagnostic avec les Infos Système**
+*   **5.3. Ajuster la Qualité de l'Image**
+
+#### **Module 6 : Sécurité et Dépannage**
+
+*   **6.1. Rappel sur la Sécurité**
+*   **6.2. Dépannage courant**
+
+---
+---
+
+### **Contenu Détaillé du Cours**
+
+---
+
+### **Module 1 : Prise en Main de Hosanna Remote**
+
+#### **1.1. Objectif de l'Outil pour la Régie**
+
+Bienvenue dans Hosanna Remote, la solution de contrôle à distance que nous avons développée pour répondre aux besoins de performance et de sécurité des professionnels.
+
+Hosanna Remote est une application qui nous permet de prendre le contrôle d'un ordinateur (le "Serveur") depuis un autre ordinateur (le "Client"), où que nous soyons. Que nous ayons besoin de fournir un support technique, d'accéder à des fichiers de bureau à distance, ou de surveiller l'état d'un serveur, Hosanna Remote nous offre les outils pour le faire de manière simple et sécurisée.
+
+**À qui s'adresse Hosanna Remote ?**
+*   **Nos techniciens de support :** Pour dépanner nos utilisateurs et nos clients à distance, comme si nous étions devant leur écran.
+*   **Nos administrateurs système :** Pour surveiller la santé de nos serveurs et accéder à leurs fichiers sans avoir à nous déplacer.
+*   **Nos collaborateurs en télétravail :** Pour leur permettre d'accéder à leur poste de bureau et à leurs documents en toute sécurité depuis leur domicile.
+*   **Toute personne ayant besoin d'une assistance rapide :** Pour aider un collègue ou un membre de sa famille avec son ordinateur, où qu'il soit.
+
+#### **1.2. Nos Fonctionnalités Essentielles**
+
+Hosanna Remote est bien plus qu'un simple outil de bureau à distance. C'est une suite complète que nous avons conçue pour nous donner un contrôle total :
+*   **Contrôle total :** Nous prenons la main sur le clavier et la souris de l'ordinateur distant.
+*   **Visualisation à distance :** Nous pouvons activer la webcam du serveur pour voir ce qui se passe autour de l'ordinateur.
+*   **Transfert de fichiers bidirectionnel :** Nous envoyons des fichiers vers le serveur ou téléchargeons des fichiers depuis le serveur en quelques clics.
+*   **Surveillance en temps réel :** Nous gardons un œil sur les performances du serveur (processeur, mémoire, disques durs) grâce à un tableau de bord clair.
+*   **Chat intégré :** Nous communiquons directement avec la personne devant l'ordinateur distant sans avoir besoin d'une application tierce.
+*   **Connexion flexible :** Nous nous connectons facilement sur un réseau local (LAN) avec une adresse IP, ou via Internet grâce à notre système de partage d'accès sécurisé.
+
+#### **1.3. Les Composants de la Solution**
+
+Notre solution se compose de deux programmes :
+
+1.  **Le Serveur (`HosannaRemoteServer.exe`)**
+    *   **Rôle :** C'est le "moteur" qui doit être lancé sur la machine **à contrôler** à la régie de Soyo.
+    *   **Fonctionnement :** Il n'a pas d'interface. Il démarre, se met en écoute et attend nos instructions.
+    *   **Prérequis :** Pour qu'il fonctionne, les fichiers suivants doivent impérativement se trouver dans le même dossier :
+        *   `HosannaRemoteServer.exe`
+        *   `cert.pem` et `key.pem` (nos certificats de sécurité pour le chiffrement).
+        *   `bore.exe` (notre outil de tunnel pour les connexions distantes).
+
+2.  **Le Client (`HosannaRemoteClient.exe`)**
+    *   **Rôle :** C'est notre "panneau de contrôle". Il sera utilisé à la fois par l'**opérateur local** à Soyo et par le **technicien distant**.
+    *   **Fonctionnement :** C'est l'application avec l'interface graphique qui permet d'initier les connexions et d'utiliser toutes les fonctionnalités.
+
+---
+
+### **Module 2 : Les Concepts Techniques (Comment ça marche ?)**
+
+Pour utiliser Hosanna Remote en toute confiance et pouvoir le dépanner efficacement, il est essentiel de comprendre son architecture de communication. Notre application n'utilise pas un seul, mais une **pile de protocoles** qui travaillent ensemble, chaque couche ayant un rôle précis.
+
+Imaginez que nous envoyons un colis :
+*   **IP** est l'adresse sur le colis.
+*   **TCP** est le service de livraison avec accusé de réception.
+*   **SSL/TLS** est le coffre-fort blindé dans lequel nous plaçons le colis.
+*   **Notre protocole applicatif** est la manière dont nous organisons les objets *à l'intérieur* du colis.
+*   **JPEG/JSON** sont les objets eux-mêmes.
+
+#### **2.1. La Fondation : TCP/IP (Le Service Postal d'Internet)**
+
+*   **Protocole IP (Internet Protocol) :**
+    *   **Définition :** C'est le protocole de base d'Internet. Son unique rôle est de prendre des paquets de données et de faire de son mieux pour les livrer à une adresse IP de destination. Il ne garantit ni l'arrivée, ni l'ordre, ni l'intégrité des paquets.
+    *   **Son rôle chez nous :** Il assure le routage de base de nos données sur le réseau local ou sur Internet.
+
+*   **Protocole TCP (Transmission Control Protocol) :**
+    *   **Définition :** TCP fonctionne "au-dessus" d'IP pour corriger ses défauts. Il établit une **connexion stable et fiable** entre le client et le serveur. Il garantit que **tous les paquets arrivent**, qu'ils sont **remis dans le bon ordre**, et qu'ils ne sont **pas corrompus**.
+    *   **Pourquoi ce choix ?** Pour le contrôle à distance, la fiabilité est cruciale. Nous ne pouvons pas nous permettre de perdre un clic de souris ou une frappe de clavier. TCP nous offre cette garantie absolue. Nous l'avons choisi plutôt que son alternative, UDP (plus rapide mais non fiable), car la précision de chaque commande est plus importante que la vitesse brute.
+
+#### **2.2. La Sécurité : SSL/TLS (Le Tunnel Blindé)**
+
+*   **Protocole SSL/TLS (Secure Sockets Layer / Transport Layer Security) :**
+    *   **Définition :** C'est une couche de chiffrement qui s'enroule autour de notre connexion TCP. Elle utilise un système de certificats (`cert.pem`, `key.pem`) pour établir une connexion sécurisée.
+    *   **Son rôle chez nous :** Il remplit trois missions de sécurité critiques :
+        1.  **Confidentialité :** Toutes les données échangées (captures d'écran, commandes, mots de passe, etc.) sont chiffrées. Même si quelqu'un parvenait à intercepter le trafic réseau, il ne verrait qu'un flux de données indéchiffrables.
+        2.  **Intégrité :** SSL/TLS garantit que les données ne sont pas modifiées pendant le transport. Personne ne peut injecter une fausse commande ou altérer un fichier en transit.
+        3.  **Authentification :** Le client a l'assurance qu'il se connecte bien à notre serveur Hosanna Remote et non à un serveur malveillant qui tenterait d'usurper son identité.
+
+#### **2.3. Notre Langage : Le Protocole Applicatif Hosanna Remote**
+
+Au-dessus de la connexion TCP sécurisée par SSL, nous avons défini notre propre "langage" pour que le client et le serveur se comprennent. Il se base sur deux règles très simples : la **Typologie** et le **Cadrage**.
+
+##### **A. La Typologie des Messages (Savoir ce que l'on reçoit)**
+
+*   **Le Problème :** Quand un bloc de données arrive, comment savoir si c'est une image du bureau, une image de la caméra, ou une commande comme "clic de souris" ?
+*   **Notre Solution :** Le **tout premier octet** de chaque message que nous envoyons est un **code d'identification**.
+
+    *   **Qu'est-ce qu'un octet ?** Un octet est la plus petite unité de mesure de l'information en informatique. C'est un nombre qui peut aller de 0 à 255. On peut le représenter par un caractère spécial.
+    *   **Son rôle chez nous :** Nous avons défini trois codes :
+        *   Le code `\x01` (l'octet numéro 1) signifie : "Attention, ce qui suit est une **image du bureau**."
+        *   Le code `\x02` (l'octet numéro 2) signifie : "Attention, ce qui suit est une **commande** (clavier, souris)."
+        *   Le code `\x03` (l'octet numéro 3) signifie : "Attention, ce qui suit est une **image de la caméra**."
+
+    Grâce à ce premier octet, le récepteur sait immédiatement quel type de "colis" il vient de recevoir et comment il doit le traiter.
+
+##### **B. Le Cadrage des Messages (Savoir où s'arrêter de lire)**
+
+*   **Le Problème :** Maintenant que nous savons que nous recevons une image, comment savoir sa taille ? Fait-elle 50 Ko ou 150 Ko ? Si nous ne lisons pas assez de données, l'image sera coupée. Si nous en lisons trop, nous allons commencer à lire le message suivant par erreur.
+*   **Notre Solution :** Juste après le code d'identification, nous envoyons un **en-tête de longueur**. C'est un petit nombre qui annonce la taille exacte du message qui va suivre.
+
+    *   **Pourquoi des tailles d'en-tête différentes ?**
+        *   **Pour les images (4 octets) :** Les images peuvent être très grandes (plusieurs centaines de milliers d'octets). Nous utilisons 4 octets (`struct.pack("!I", ...)`) pour pouvoir représenter des nombres très grands (jusqu'à 4 milliards). Cela nous donne une marge de sécurité énorme pour des images de très haute résolution.
+        *   **Pour les commandes (2 octets) :** Les commandes sont toujours très courtes (ex: "MV,120,340"). Utiliser 2 octets (`struct.pack("!H", ...)`) nous permet de représenter des tailles allant jusqu'à 65 535 octets, ce qui est largement suffisant pour n'importe quelle commande, tout en étant légèrement plus économique que d'utiliser 4 octets.
+
+*   **Le processus complet pour une capture d'écran :**
+    1.  Le serveur envoie l'octet `\x01` (pour dire "c'est une image").
+    2.  Le serveur mesure la taille de l'image JPEG (disons, 50 000 octets). Il convertit ce nombre en 4 octets et les envoie.
+    3.  Le serveur envoie les 50 000 octets de l'image elle-même.
+    4.  Le client lit le premier octet, voit `\x01` et se dit "OK, je reçois une image".
+    5.  Il lit les 4 octets suivants, les reconvertit en nombre et apprend qu'il doit lire exactement 50 000 octets.
+    6.  Il lit ces 50 000 octets, et sait que l'image est complète. Il est maintenant prêt à recevoir le message suivant.
+
+Cette méthode de **Typologie + Cadrage** est le cœur de notre protocole. Elle garantit que la communication est robuste, sans erreur d'interprétation, et nous permet de mélanger des types de données très différents (images, commandes) sur une seule et même connexion TCP.
+
+#### **2.4. Le Contenu : Formats de Données**
+
+Enfin, une fois qu'un message est reçu et identifié, son contenu doit être interprété. Nous utilisons deux formats principaux :
+
+*   **JPEG (Joint Photographic Experts Group) :**
+    *   **Définition :** Un format de compression d'image très répandu qui permet de réduire considérablement la taille des fichiers en sacrifiant une petite partie de la qualité (souvent imperceptible).
+    *   **Son rôle chez nous :** Utilisé pour les captures d'écran et les images de la caméra. C'est le choix idéal pour le streaming vidéo sur des réseaux à bande passante variable. Il nous permet d'offrir une expérience fluide en ajustant le niveau de compression via le curseur "Qualité de l'image" dans le client.
+
+*   **JSON (JavaScript Object Notation) :**
+    *   **Définition :** Un format de texte léger et lisible par l'homme pour structurer des données. Il fonctionne avec des paires "clé":"valeur".
+    *   **Son rôle chez nous :** Nous l'utilisons pour toutes les données structurées qui ne sont pas des images, comme la liste des caméras disponibles ou les informations système détaillées (CPU, RAM, disques). C'est un format très flexible qui nous permet d'ajouter ou de modifier facilement les informations transmises sans casser la compatibilité.
+
+---
+
+### **Module 3 : Procédure de Connexion Locale (pour l'Opérateur à Soyo)**
+
+Ce module décrit la procédure standard pour que l'opérateur à la régie de Soyo puisse se connecter à la machine serveur en utilisant le réseau local (LAN). C'est la première étape indispensable avant de pouvoir partager l'accès à un technicien distant.
+
+#### **3.1. Lancement du Serveur sur la machine de la régie**
+
+1.  Naviguez jusqu'au dossier contenant les fichiers de Hosanna Remote sur la machine que vous souhaitez contrôler.
+2.  Double-cliquez sur `HosannaRemoteServer.exe` pour le lancer.
+3.  **Important :** Le serveur n'a pas d'interface graphique. Il se lance en arrière-plan. Pour vérifier qu'il est bien en cours d'exécution, vous pouvez ouvrir le Gestionnaire des tâches de Windows (`Ctrl+Shift+Esc`) et chercher le processus `HosannaRemoteServer.exe`.
+
+#### **3.2. Lancement du Client sur le poste de l'opérateur**
+
+1.  Sur votre propre poste de travail (celui depuis lequel vous allez prendre le contrôle), lancez l'application `HosannaRemoteClient.exe`.
+2.  La fenêtre de connexion s'affiche.
+
+#### **3.3. Se connecter en utilisant l'onglet "Connexion Locale"**
+
+1.  Assurez-vous que l'onglet **"Connexion Locale"** est bien sélectionné.
+2.  **Champ "Adresse IP du serveur" :** Vous devez entrer ici l'adresse IP locale de la machine serveur.
+    *   **Comment trouver l'adresse IP locale ?**
+        1.  Sur la machine serveur, ouvrez une invite de commande (tapez `cmd` dans le menu Démarrer).
+        2.  Tapez la commande `ipconfig` et appuyez sur Entrée.
+        3.  Cherchez la ligne "Adresse IPv4". L'adresse ressemblera à `192.168.1.x` ou `10.0.x.x`. C'est cette adresse que vous devez utiliser.
+3.  **Champ "Port" :** Laissez la valeur par défaut, qui est `1981`.
+4.  Cliquez sur le bouton **"Se connecter"**.
+
+Si les informations sont correctes et que le réseau fonctionne bien, l'application passera à l'écran principal, vous donnant accès à toutes les fonctionnalités de contrôle à distance. Vous devriez voir le bureau de la machine distante s'afficher.
+
+---
+
+### **Module 4 : Procédure de Partage d'Accès pour une Intervention Distante**
+
+Ce module est au cœur de notre solution. Il explique comment un opérateur local à Soyo peut donner un accès sécurisé à un technicien qui se trouve n'importe où sur Internet.
+
+#### **4.1. Le Principe du Tunnel**
+
+Quand une machine est dans un réseau local, elle est protégée du monde extérieur par un routeur. Pour permettre à un technicien distant de s'y connecter, nous devons créer un "pont" sécurisé à travers ce routeur.
+
+C'est le rôle du bouton "Partager l'accès à distance". En cliquant dessus, nous demandons au serveur de lancer l'outil `bore.exe` en arrière-plan. Cet outil va créer deux "tunnels" chiffrés entre la machine de la régie et un serveur public sur Internet (`bore.pub`).
+
+Le serveur nous renvoie alors une adresse et un port publics. C'est la "porte d'entrée" de ce pont, que nous pouvons communiquer au technicien distant. La connexion reste entièrement sécurisée de bout en bout grâce à notre propre chiffrement SSL/TLS qui passe *à l'intérieur* de ce tunnel.
+
+#### **4.2. Étape par étape pour l'Opérateur Local (à Soyo)**
+
+1.  **Prérequis :** L'opérateur doit d'abord être connecté au serveur en utilisant la méthode de **Connexion Locale** (décrite au Module 3).
+2.  **Générer les informations de partage :**
+    *   Une fois connecté, allez dans l'onglet **"Paramètres"**.
+    *   Cliquez sur le bouton **"Partager l'accès à distance"**.
+3.  **Récupérer les informations :**
+    *   Après quelques secondes, une fenêtre pop-up apparaît. Elle contient l'**Adresse Publique** et le **Port Public** de la connexion principale.
+    *   **Note :** En arrière-plan, un deuxième tunnel pour le transfert de fichiers est également créé. Le client distant recevra cette information automatiquement.
+4.  **Transmettre les informations :**
+    *   Communiquez **uniquement** l'adresse et le port affichés dans la fenêtre pop-up au technicien distant (par téléphone, SMS, Signal, etc.).
+
+La session de partage est maintenant active et attend la connexion du technicien.
+
+#### **4.3. Étape par étape pour le Technicien Distant**
+
+1.  **Lancer le client :** Le technicien lance `HosannaRemoteClient.exe` sur son propre ordinateur.
+2.  **Utiliser l'onglet "Connexion Distante" :**
+    *   Dans la fenêtre de connexion, sélectionnez l'onglet **"Connexion Distante"**.
+3.  **Saisir les informations :**
+    *   Dans le champ **"Adresse publique"**, entrez l'adresse fournie par l'opérateur (par exemple, `bore.pub`).
+    *   Dans le champ **"Port public"**, entrez le port fourni par l'opérateur (par exemple, `20017`).
+4.  **Se connecter :**
+    *   Cliquez sur **"Se connecter"**.
+
+L'application va établir la connexion via le tunnel. Une fois connecté, le technicien aura exactement le même accès que s'il était en connexion locale.
+
+---
+
+### **Module 5 : Utilisation des Outils de Maintenance**
+
+Une fois la connexion établie, Hosanna Remote met à notre disposition une suite d'outils puissants pour le diagnostic et la maintenance.
+
+#### **5.1. Navigation et Transfert de Fichiers**
+
+L'onglet **"Transferts"** est notre explorateur de fichiers à distance. Il nous permet d'interagir avec le système de fichiers du serveur de manière intuitive.
+
+*   **Navigation :**
+    *   Double-cliquez sur un dossier pour y entrer.
+    *   Utilisez le bouton "⬆" pour remonter au dossier parent.
+    *   Le chemin actuel est toujours affiché en haut.
+
+*   **Envoyer un fichier vers le serveur (Upload) :**
+    1.  Cliquez sur le bouton **"Envoyer un fichier..."**.
+    2.  Une fenêtre s'ouvre, vous permettant de choisir un fichier sur **votre propre ordinateur**.
+    3.  Sélectionnez le fichier et validez. Le transfert commence automatiquement.
+    4.  Le fichier sera sauvegardé dans le dossier `Téléchargements/Hosanna Tv Reception` sur la machine **serveur**.
+
+*   **Télécharger un fichier depuis le serveur (Download) :**
+    1.  Naviguez jusqu'au fichier que vous souhaitez récupérer sur le serveur.
+    2.  **Double-cliquez** sur le fichier.
+    3.  Une fenêtre s'ouvre, vous demandant où sauvegarder le fichier sur **votre propre ordinateur**.
+    4.  Choisissez un emplacement et validez pour démarrer le téléchargement.
+
+#### **5.2. Diagnostic avec les Infos Système**
+
+L'onglet **"Infos Système"** est notre tableau de bord pour la santé de la machine distante. Il nous permet de voir en un coup d'œil si une ressource est surchargée.
+
+*   **Utilisation CPU :** Indique le pourcentage d'utilisation du processeur. Une valeur constamment élevée (proche de 100%) peut indiquer qu'un programme est bloqué ou trop gourmand.
+*   **Utilisation RAM :** Montre la quantité de mémoire vive utilisée. Si cette barre est presque pleine, la machine peut devenir très lente.
+*   **Utilisation Disque :** Affiche l'espace occupé sur les différents disques durs du serveur. Utile pour vérifier si un disque est plein.
+
+#### **5.3. Ajuster la Qualité de l'Image**
+
+L'onglet **"Paramètres"** contient un outil essentiel pour gérer les connexions à faible bande passante.
+
+*   **Le curseur "Qualité de l'image" :**
+    *   **Scénario :** Si le technicien distant trouve que l'affichage du bureau est lent, saccadé ou a du retard.
+    *   **Solution :** Il peut se rendre dans l'onglet "Paramètres" et **baisser la qualité de l'image** (par exemple, à 50% ou moins).
+    *   **Résultat :** L'image sera légèrement plus floue, mais le flux sera beaucoup plus fluide, car la quantité de données à envoyer sur Internet sera réduite. C'est le compromis à faire pour garantir une bonne réactivité.
+
+---
+
+### **Module 6 : Sécurité et Dépannage**
+
+Ce dernier module rappelle les aspects de sécurité de notre solution et fournit un guide pour résoudre les problèmes les plus courants.
+
+#### **6.1. Rappel sur la Sécurité**
+
+La sécurité est au cœur de la conception de Hosanna Remote. Il est important de comprendre et de se souvenir de ces points :
+
+*   **Chiffrement de bout en bout :** Grâce à SSL/TLS, toutes les communications entre le client et le serveur sont entièrement chiffrées. Personne ne peut voir ce que vous faites.
+*   **Connexions initiées par le serveur :** Le partage d'accès à distance ne peut être initié que par un client déjà connecté en local. Un technicien distant ne peut pas forcer la création d'un tunnel.
+*   **Nature temporaire des tunnels :** L'adresse et le port publics générés par `bore.exe` ne sont valides que pour la session en cours. Dès que le processus `HosannaRemoteServer.exe` est arrêté, les tunnels sont immédiatement détruits. Il n'y a pas de "porte dérobée" permanente.
+
+#### **6.2. Dépannage courant**
+
+Voici une liste des problèmes les plus fréquents et leurs solutions.
+
+*   **Problème : "Connexion refusée" lors d'une connexion locale.**
+    *   **Cause probable :** Le serveur n'est pas démarré, l'adresse IP est incorrecte, ou un pare-feu bloque la connexion.
+    *   **Solutions :**
+        1.  Vérifiez que `HosannaRemoteServer.exe` est bien en cours d'exécution dans le Gestionnaire des tâches sur la machine serveur.
+        2.  Vérifiez que l'adresse IP que vous avez entrée dans le client correspond bien à l'adresse IPv4 de la machine serveur (utilisez `ipconfig` sur le serveur pour vérifier).
+        3.  Assurez-vous que le pare-feu de Windows sur la machine serveur autorise les connexions entrantes sur le port `1981`.
+
+*   **Problème : "Le partage d'accès échoue" ou le pop-up affiche une erreur.**
+    *   **Cause probable :** L'outil de tunnel `bore.exe` est manquant ou est bloqué.
+    *   **Solutions :**
+        1.  Vérifiez que le fichier `bore.exe` est bien présent dans le même dossier que `HosannaRemoteServer.exe`.
+        2.  Assurez-vous qu'aucun antivirus ou pare-feu ne bloque l'exécution de `bore.exe`. Vous devrez peut-être ajouter une exception pour ce fichier.
+
+*   **Problème : L'affichage du bureau est lent ou saccadé pour le technicien distant.**
+    *   **Cause probable :** La connexion Internet (côté serveur ou côté client) est lente.
+    *   **Solution :** Le technicien distant doit se rendre dans l'onglet **"Paramètres"** de son client et **baisser la qualité de l'image** à l'aide du curseur. Une valeur de 50% ou moins améliore considérablement la fluidité.
+
+*   **Problème : Le transfert de fichiers ou les infos système ne fonctionnent pas en connexion distante.**
+    *   **Cause probable :** Le deuxième tunnel pour le transfert de fichiers n'a pas pu être établi.
+    *   **Solution :** C'est souvent lié au même problème que l'échec du partage d'accès. Assurez-vous que `bore.exe` n'est pas bloqué par un pare-feu ou un antivirus.

@@ -163,6 +163,17 @@ class ServerChatWindow:
         self.client_address = client_address
         self.stop_event_client_handler = stop_event_client_handler
         self.on_window_closed_callback = on_window_closed_callback
+        self.message_queue = Queue()
+        self.root = None
+        self.chat_window = None
+        self.chat_history = None
+        self.message_var = None
+        self.message_input = None
+        self.send_button = None
+        self._offset_x = 0
+        self._offset_y = 0
+
+    def _setup_ui(self):
         self.root = tk.Tk()
         self.root.withdraw() # Hide the main Tkinter window
         self.chat_window = tk.Toplevel(self.root) # Create a Toplevel window instead
@@ -210,7 +221,8 @@ class ServerChatWindow:
 
     def _on_press(self, event): self._offset_x, self._offset_y = event.x, event.y
     def _on_drag(self, event): self.chat_window.geometry(f"+{self.chat_window.winfo_pointerx() - self._offset_x}+{self.chat_window.winfo_pointery() - self._offset_y}")
-    def _update_send_button_state(self, *args): self.send_button.config(state='normal' if self.message_var.get().strip() else 'disabled')
+    def _update_send_button_state(self, *args):
+        if self.send_button: self.send_button.config(state='normal' if self.message_var.get().strip() else 'disabled')
     def _check_message_queue(self):
         try:
             while True:
@@ -218,14 +230,14 @@ class ServerChatWindow:
                 self._add_message_to_history(sender, message)
         except Empty: pass
         finally:
-            if self.chat_window and self.chat_window.winfo_exists(): self.chat_window.after(100, self._check_message_queue)
+            if self.chat_window and self.chat_window.winfo_exists(): self.chatWindow.after(100, self._check_message_queue)
     def _add_message_to_history(self, sender, message):
         self.chat_history.config(state='normal')
         self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {sender}: {message}\n", sender.lower())
         self.chat_history.config(state='disabled')
         self.chat_history.see(tk.END)
     def add_message(self, sender, message):
-        if self.chat_window and self.chat_window.winfo_exists(): self.message_queue.put((sender, message))
+        self.message_queue.put((sender, message))
     def _send_message_from_gui(self, event=None):
         message = self.message_input.get().strip()
         if message:
@@ -242,6 +254,7 @@ class ServerChatWindow:
         if self.chat_window and self.chat_window.winfo_exists(): self.chat_window.after_idle(self.chat_window.destroy)
         if self.root and self.root.winfo_exists(): self.root.after_idle(self.root.destroy)
     def start_loop(self):
+        self._setup_ui()
         self.root.mainloop()
 
 def stream_frames(client_socket, stop_event, session_settings):
