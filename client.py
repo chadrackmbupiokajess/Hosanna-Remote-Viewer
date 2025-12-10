@@ -592,7 +592,7 @@ class RemoteViewerApp(App):
 
         settings_tab = TabbedPanelItem(text='Paramètres')
         root_layout = BoxLayout(padding=dp(30), orientation='vertical')
-        quality_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(180), padding=dp(20), spacing=dp(10))
+        quality_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(240), padding=dp(20), spacing=dp(10)) # Increased height
         with quality_card.canvas.before:
             Color(rgba=get_color_from_hex('#2C2F33'))
             self.quality_card_rect = RoundedRectangle(size=quality_card.size, pos=quality_card.pos, radius=[dp(15)])
@@ -617,6 +617,9 @@ class RemoteViewerApp(App):
         
         share_button = Button(text='Partager l\'accès à distance', on_press=self.generate_share_code, size_hint_y=None, height=dp(50))
         quality_card.add_widget(share_button)
+
+        disconnect_button = Button(text='Retour à la connexion', on_press=self.disconnect_and_return, size_hint_y=None, height=dp(50), background_color=get_color_from_hex('#DA3633'))
+        quality_card.add_widget(disconnect_button)
 
         root_layout.add_widget(quality_card)
         root_layout.add_widget(BoxLayout())
@@ -725,6 +728,7 @@ class RemoteViewerApp(App):
         description = Label(text='Une application de bureau à distance sécurisée et performante, conçue pour offrir un contrôle fluide et un accès facile à vos fichiers et informations système.', font_size='14sp', color=get_color_from_hex('#99AAB5'), halign='left', valign='top')
         description.bind(width=lambda i, v: setattr(i, 'text_size', (v, None)))
         info_card.add_widget(description)
+        
         about_layout.add_widget(info_card)
         about_layout.add_widget(BoxLayout())
         about_tab.add_widget(about_layout)
@@ -1327,6 +1331,23 @@ class RemoteViewerApp(App):
                 self.remote_widget.client_socket = None
                 self.remote_camera_widget.client_socket = None
             Clock.schedule_once(self.switch_to_connect_screen)
+
+    def disconnect_and_return(self, instance):
+        """Ferme la connexion et retourne à l'écran de connexion."""
+        if self.remote_widget.client_socket:
+            try:
+                self.remote_widget.client_socket.shutdown(socket.SHUT_RDWR)
+                self.remote_widget.client_socket.close()
+            except OSError as e:
+                print(f"[!] Erreur lors de la fermeture du socket (peut être ignorée): {e}")
+            finally:
+                self.remote_widget.client_socket = None
+                self.remote_camera_widget.client_socket = None
+        
+        # Le thread receive_frames devrait se terminer de lui-même, 
+        # ce qui déclenchera switch_to_connect_screen.
+        # Mais pour plus de réactivité, on peut le faire manuellement.
+        Clock.schedule_once(self.switch_to_connect_screen)
 
     def update_available_cameras(self, camera_indices):
         self.available_cameras = [f"Caméra {i}" for i in camera_indices]
