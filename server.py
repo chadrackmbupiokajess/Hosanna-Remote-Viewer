@@ -190,7 +190,7 @@ class ServerChatWindow:
         main_frame.pack(fill=tk.BOTH, expand=True)
         title_bar = tk.Frame(main_frame, bg='gray', relief='raised', bd=0)
         title_bar.pack(expand=False, fill='x')
-        title_label = tk.Label(title_bar, text=f"Chat avec {self.client_address[0]}", bg='gray', fg='white')
+        title_label = tk.Label(title_bar, text="Système de Chat", bg='gray', fg='white')
         title_label.pack(side=tk.LEFT, padx=10)
         title_bar.bind("<ButtonPress-1>", self._on_press)
         title_bar.bind("<B1-Motion>", self._on_drag)
@@ -230,7 +230,7 @@ class ServerChatWindow:
                 self._add_message_to_history(sender, message)
         except Empty: pass
         finally:
-            if self.chat_window and self.chat_window.winfo_exists(): self.chatWindow.after(100, self._check_message_queue)
+            if self.chat_window and self.chat_window.winfo_exists(): self.chat_window.after(100, self._check_message_queue)
     def _add_message_to_history(self, sender, message):
         self.chat_history.config(state='normal')
         self.chat_history.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {sender}: {message}\n", sender.lower())
