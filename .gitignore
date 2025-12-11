@@ -4,7 +4,7 @@ firebase-credentials.json
 # Ignorer les dossiers de compilation de PyInstaller
 build/
 dist/
-*.spec
+# *.spec # Autorisé pour Buildozer
 
 # Ignorer les fichiers temporaires et de cache Python
 __pycache__/
@@ -20,3 +20,7 @@ env/
 *.swp
 *.bak
 *~
+
+# Ignorer le dossier de compilation Buildozer
+.buildozer/
+bin/

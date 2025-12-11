@@ -4,6 +4,8 @@ Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.utils import get_color_from_hex
+from kivy.core.clipboard import Clipboard
+from kivy.uix.filechooser import FileChooserListView
 
 import socket
 import struct
@@ -13,7 +15,6 @@ import ssl
 import os
 import json
 import time
-from tkinter import Tk, filedialog
 from kivy.app import App
 from kivy.lang import Builder
 from kivy.metrics import dp
@@ -34,9 +35,6 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.properties import StringProperty, BooleanProperty, ListProperty, ColorProperty, NumericProperty
 from os.path import expanduser
-import pyperclip
-import pythoncom
-from kivy.uix.spinner import Spinner # Import Spinner
 import sys
 from kivy.resources import resource_add_path
 
@@ -984,13 +982,11 @@ class RemoteViewerApp(App):
                 self.file_browser_grid.add_widget(widget)
 
     def choose_and_upload_file(self, instance):
-        Tk().withdraw()
-        file_path = filedialog.askopenfilename(title="Choisir un fichier à envoyer", initialdir=expanduser("~"))
-        if file_path:
-            self.cancel_transfer_flag.clear()
-            threading.Thread(target=self._upload_file_thread, args=(file_path,), daemon=True).start()
+        self._open_file_chooser(self._upload_file_thread)
 
     def _upload_file_thread(self, file_path):
+        if not file_path:
+            return
         def update_status(text): Clock.schedule_once(lambda dt: setattr(self.transfer_status_label, 'text', text))
         def update_progress(value): Clock.schedule_once(lambda dt: setattr(self.transfer_progress_bar, 'value', value))
         Clock.schedule_once(lambda dt: setattr(self.cancel_button, 'disabled', False))
@@ -1028,13 +1024,11 @@ class RemoteViewerApp(App):
             self.cancel_transfer_flag.clear()
 
     def choose_and_download_file(self, remote_path, filename):
-        Tk().withdraw()
-        save_path = filedialog.asksaveasfilename(title="Enregistrer le fichier sous...", initialdir=expanduser("~"), initialfile=filename)
-        if save_path:
-            self.cancel_transfer_flag.clear()
-            threading.Thread(target=self._download_file_thread, args=(remote_path, save_path), daemon=True).start()
+        self._open_file_chooser(self._download_file_thread, save_mode=True, remote_path=remote_path, filename=filename)
 
-    def _download_file_thread(self, remote_path, save_path):
+    def _download_file_thread(self, save_path, remote_path=None):
+        if not save_path or not remote_path:
+            return
         def update_status(text): Clock.schedule_once(lambda dt: setattr(self.transfer_status_label, 'text', text))
         def update_progress(value): Clock.schedule_once(lambda dt: setattr(self.transfer_progress_bar, 'value', value))
         Clock.schedule_once(lambda dt: setattr(self.cancel_button, 'disabled', False))
@@ -1089,6 +1083,46 @@ class RemoteViewerApp(App):
             Clock.schedule_once(lambda dt: setattr(self.cancel_button, 'disabled', True))
             self.cancel_transfer_flag.clear()
 
+    def _open_file_chooser(self, callback, save_mode=False, remote_path=None, filename=None):
+        content = BoxLayout(orientation='vertical')
+        
+        # On Android, start from a common public directory
+        start_path = "/storage/emulated/0"
+        if not os.path.exists(start_path):
+            start_path = expanduser("~")
+
+        filechooser = FileChooserListView(path=start_path)
+        content.add_widget(filechooser)
+
+        buttons = BoxLayout(size_hint_y=None, height=dp(50))
+        
+        if save_mode:
+            text_input = TextInput(text=filename or '', multiline=False, size_hint_y=None, height=dp(40))
+            content.add_widget(text_input)
+
+        popup = Popup(title="Sélectionner un fichier" if not save_mode else "Enregistrer le fichier", content=content, size_hint=(0.9, 0.9))
+
+        def on_select(instance):
+            path = filechooser.selection and filechooser.selection[0] or None
+            if save_mode:
+                path = os.path.join(filechooser.path, text_input.text)
+                threading.Thread(target=callback, args=(path, remote_path), daemon=True).start()
+            else:
+                if path:
+                    threading.Thread(target=callback, args=(path,), daemon=True).start()
+            popup.dismiss()
+
+        select_button = Button(text="Sélectionner" if not save_mode else "Enregistrer")
+        select_button.bind(on_press=on_select)
+        buttons.add_widget(select_button)
+
+        cancel_button = Button(text="Annuler")
+        cancel_button.bind(on_press=popup.dismiss)
+        buttons.add_widget(cancel_button)
+        
+        content.add_widget(buttons)
+        popup.open()
+
     def send_quality_setting(self, quality_value):
         if self.remote_widget.client_socket:
             try:
@@ -1132,17 +1166,8 @@ class RemoteViewerApp(App):
             self.chat_history_label.parent.scroll_y = 0
 
     def monitor_clipboard_changes(self):
-        pythoncom.CoInitialize()
-        try:
-            self.last_clipboard_content = pyperclip.paste()
-            while not self.clipboard_stop_event.is_set():
-                current_clipboard = pyperclip.paste()
-                if current_clipboard != self.last_clipboard_content and current_clipboard != self.last_clipboard_content_from_server:
-                    self.last_clipboard_content = current_clipboard
-                    self.send_clipboard_to_server(current_clipboard)
-                time.sleep(0.5)
-        except Exception as e: print(f"[!] Erreur dans monitor_clipboard_changes: {e}")
-        finally: pythoncom.CoUninitialize()
+        # This method is disabled for Android compatibility
+        pass
 
     def discover_server(self, instance):
         self.status_label.text = "Recherche d'un serveur..."
@@ -1241,7 +1266,7 @@ class RemoteViewerApp(App):
             self.send_quality_setting(70)
             Clock.schedule_once(self.switch_to_remote_screen)
             self.clipboard_stop_event.clear()
-            threading.Thread(target=self.monitor_clipboard_changes, daemon=True).start()
+            # The clipboard monitoring thread is not started on Android
         except ConnectionRefusedError:
             Clock.schedule_once(lambda dt: self.show_connection_error("Connexion refusée. Vérifiez l'IP, le port et le statut du serveur."))
         except socket.timeout:
@@ -1307,7 +1332,7 @@ class RemoteViewerApp(App):
                         elif cmd_type == 'CLIPBOARD_UPDATE':
                             content = value_str
                             try:
-                                pyperclip.copy(content)
+                                Clipboard.copy(content)
                                 self.last_clipboard_content = content
                                 self.last_clipboard_content_from_server = content
                             except Exception as e: print(f"[!] Erreur lors de la mise à jour du presse-papiers client: {e}")
